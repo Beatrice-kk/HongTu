@@ -20,11 +20,11 @@
   <tr>
     <!-- 第一张图：固定宽度200px，居中显示 -->
     <td style="padding: 0 10px; text-align: center;">
-      <img src="wxzhifu.jpeg" alt="vx支付" width="200" style="height: auto;">
+      <img src="wxzhifu.jpeg" alt="vx支付" width="300" style="height: auto;">
     </td>
     <!-- 第二张图：与第一张保持相同宽度 -->
     <td style="padding: 0 10px; text-align: center;">
-      <img src="dayiqun.jpeg" alt="dayiqun" width="200" style="height: auto;">
+      <img src="dayiqun.jpeg" alt="dayiqun" width="300" style="height: auto;">
     </td>
   </tr>
 </table>
