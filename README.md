@@ -1,6 +1,8 @@
 # 「元启鸿图-HongTu」
 
-***员工双休，readme之后补上，可先自己尝试，若有疑问可加群。***
+## 部署教程
+
+***员工双休，教程会在工作日完善，可先自己尝试，若有疑问可加群联系。***
   
   
 ## 公司招聘：
@@ -14,4 +16,7 @@
 公司邮箱：yuanqizhiti@163.com  
 
 ## 联系方式及打赏
-![图片1wx支付](wxzhifu.jpeg) ![图片2联系方式](dayiqun.jpeg)
+<table><tr>
+<td><img src="wxzhifu.jpeg" alt="vx支付"></td>
+<td><img src="dayiqun.jpeg" alt="dayiqun"></td>
+</tr></table>
