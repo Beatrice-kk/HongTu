@@ -5,7 +5,7 @@
 ***员工双休，教程会在工作日完善，可先自己尝试，若有疑问可加群联系。***
   
   
-## 公司招聘：
+## 公司招聘
 招聘岗位：  
 1.Slam导航算法工程师  
 2.嵌入式工程师  
@@ -16,7 +16,13 @@
 公司邮箱：yuanqizhiti@163.com  
 
 ## 联系方式及打赏
-<table><tr>
-<td><img src="wxzhifu.jpeg" alt="vx支付"></td>
-<td><img src="dayiqun.jpeg" alt="dayiqun"></td>
-</tr></table>
+<table style="border-collapse: collapse; width: 100%;">
+  <tr>
+    <td style="width: 50%; padding: 10px; text-align: center;">
+      <img src="wxzhifu.jpeg" alt="vx支付" style="max-width: 100%; height: auto; max-height: 300px;">
+    </td>
+    <td style="width: 50%; padding: 10px; text-align: center;">
+      <img src="dayiqun.jpeg" alt="dayiqun" style="max-width: 100%; height: auto; max-height: 300px;">
+    </td>
+  </tr>
+</table>
