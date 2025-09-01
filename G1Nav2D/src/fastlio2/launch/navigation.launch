@@ -18,14 +18,9 @@
 
     <include file="$(find pointcloud_to_laserscan)/launch/point_to_scan.launch" />
 
-    <include file="$(find tool)/launch/body2map_pointcloud.launch">
-    </include>
     <include file="$(find tool)/launch/body2any_pointcloud.launch">
     </include>
-    <node pkg="tool" type="path2waypoint" name="path2waypoint" output="screen">
-        <param name="odom_topic" value="slam_odom" />
-        <param name="path_topic" value="/move_base/GlobalPlanner/plan" />
-    </node>
+
 
     <include file="$(find velocity_smoother_ema)/launch/velocity_smoother_ema.launch">
     </include>

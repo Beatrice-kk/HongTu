@@ -117,12 +117,6 @@ target_link_libraries(temp_node
   ${catkin_LIBRARIES} ${PCL_LIBRARIES}
 )
 
-add_executable(realtime_pcd_saver src/realtime_pcd_saver.cpp ${SRC_LIST})
-
-target_link_libraries(realtime_pcd_saver
-  ${catkin_LIBRARIES} ${PCL_LIBRARIES}
-)
-
 # add_executable(path2waypoint src/path2waypoint.cpp ${SRC_LIST})
 
 # target_link_libraries(path2waypoint
