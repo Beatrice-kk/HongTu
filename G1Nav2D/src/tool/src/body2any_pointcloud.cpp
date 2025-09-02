@@ -24,7 +24,7 @@ public:
       listener_.waitForTransform(target_frame_, cloud_msg->header.frame_id,
                                  cloud_msg->header.stamp, ros::Duration(1.0));
       pcl_ros::transformPointCloud(target_frame_, *cloud_msg, cloud_out, listener_);
-      cloud_out.header.stamp = ros::Time::now();
+      cloud_out.header.stamp = cloud_msg->header.stamp;
       cloud_out.header.frame_id = target_frame_;
       pub_.publish(cloud_out);
     }

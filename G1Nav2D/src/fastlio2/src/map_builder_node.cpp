@@ -1060,10 +1060,10 @@ public:
             // auto end = std::chrono::steady_clock::now();
             // std::chrono::duration<double> elapsed_seconds = end - start;
             // std::cout << "Add KeyPose Time: " << elapsed_seconds.count() << " seconds" << std::endl;
-            publishCloud(body_cloud_org_pub_,
-                            pcl2msg(measure_group_.lidar_org,
-                                    body_frame_,
-                                    current_time_));
+            // publishCloud(body_cloud_org_pub_,
+             //                pcl2msg(measure_group_.lidar_org,
+              //                       body_frame_,
+             //                        current_time_));
 
             publishCloud(body_cloud_pub_,
                          pcl2msg(lio_builder_->cloudUndistortedBody(),
