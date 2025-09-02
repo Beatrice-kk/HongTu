@@ -50,6 +50,11 @@
   catkin_make
   ```
 
+- 安装依赖包
+  ``` bash
+  sudo apt install ros-noetic-local-planner ros-noetic-global-planner ros-noetic-costmap-server
+  ```
+
 - 建图及保存
   ``` bash
   # 建图
@@ -64,8 +69,19 @@
   rosrun map_server map_saver map:=/projected_map -f /home/nvidia/mymap
   ```
 
+- 编辑地图
+  ``` bash
+  # 打开地图，利用Map Eraser Tool修改地图，ctrl+加号或减号可修改画笔大小，保存地图
+  source devel/setup.bash
+  roslaunch ros_map_edit map_edit.lunch
+  ```
+
 - 开启导航
   ``` bash
+  #修改地图路径
+  cd HongTu/G1Nav2D/fastlio2/config/
+  gedit gridmap_load.launch
+  
   # 启动导航，启动导航后需自行按照雷达位置重定位
   cd HongTu/G1Nav2D/
   source devel/setup.bash
