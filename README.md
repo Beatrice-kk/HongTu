@@ -30,7 +30,7 @@
 - 更改雷达ip及地图保存路径
   ``` bash
   # 修改本机与雷达ip
-  cd HongTu/G1Nav2D/HongTu/src/livox_ros_driver2-master/config/
+  cd HongTu/G1Nav2D/src/livox_ros_driver2-master/config/
   gedit MID360_config.json
   
   # 修改地图保存路径，将该文件下最底部路径改为自己的电脑
@@ -44,7 +44,7 @@
   catkin_make
   
   #遇到报错可先执行以下命令
-  cd HongTu/G1Nav2D/livox_ros_driver2-master/
+  cd HongTu/G1Nav2D/src/livox_ros_driver2-master/
   ./build.sh ROS1
   cd HongTu/G1Nav2D/
   catkin_make
@@ -52,7 +52,7 @@
 
 - 安装依赖包
   ``` bash
-  sudo apt install ros-noetic-local-planner ros-noetic-global-planner ros-noetic-costmap-server
+  sudo apt install ros-noetic-teb-local-planner ros-noetic-global-planner ros-noetic-costmap-server
   ```
 
 - 建图及保存
@@ -79,7 +79,7 @@
 - 开启导航
   ``` bash
   #修改地图路径
-  cd HongTu/G1Nav2D/fastlio2/config/
+  cd HongTu/G1Nav2D/src/fastlio2/config/
   gedit gridmap_load.launch
   
   # 启动导航，启动导航后需自行按照雷达位置重定位
@@ -92,7 +92,7 @@
 安装unitree_sdk2_python参考[宇树官方文档](https://github.com/unitreerobotics/unitree_sdk2_python.git)
   ``` bash
   # 打开新终端，网口可通过ifconfig命令查询自行更改
-  cd HongTu/unitee_sdk2_python/example/g1/high_level/
+  cd HongTu/unitree_sdk2_python/example/g1/high_level/
   python3 g1_control.py 网口
   ```
 在rviz中发布目标点即可自主导航
