@@ -73,7 +73,7 @@
   ``` bash
   # 打开地图，利用Map Eraser Tool修改地图，ctrl+加号或减号可修改画笔大小，保存地图
   source devel/setup.bash
-  roslaunch ros_map_edit map_edit.lunch
+  roslaunch ros_map_edit map_edit.launch
   ```
 
 - 开启导航
@@ -98,8 +98,48 @@
 在rviz中发布目标点即可自主导航
 
 ### 语音交互
-> ***待补充。***
+基于[pyxiaozhi](https://github.com/huangjunsen0406/py-xiaozhi)，ubuntu20.04默认python版本不符合，安装小智需要配置虚拟环境。
+- 基础要求
+    Python版本：3.9 - 3.12
+    操作系统：Windows 10+、macOS 10.15+、Linux
+    音频设备：麦克风和扬声器设备
+    网络连接：稳定的互联网连接（用于AI服务和在线功能）
 
+- 安装依赖
+  ``` bash
+  cd PythonProject/py-xiaozhi-main/
+  pip install -r requirements.txt
+  ```
+  
+- 语音导航至目标点简易版
+  1. 全局搜索关键词“电梯”，将所有“电梯”替换成你需要的关键词，例如“卧室”、“卫生间”等。
+  2. 在Pythonproject/point_nav/point2.py修改改点坐标，修改位置在该程序最底部。（坐标可以通过导航发布目标点时，监听/move_base/goal话题获取，手动输入，当前为测试版本，每个目标点为不同的启动程序）
+ 
+- 导航到目标点MCP服务
+  ``` bash
+  #以导航至电梯目标点为例
+  # 在该文件的第1232行，修改或添加导航至目标点的关键词
+  PythonProject/py-xiaozhi-main/src/application.py
+  
+  # 在该文件的第334行，修改或添加mcp服务的注册信息
+  PythonProject/py-xiaozhi-main/src/mcp/mcp_server.py
+  
+  #在该文件的第15至第17行，选择该mcp服务拉起的python程序，以及启动该程序的编译器路径
+  PythonProject/py-xiaozhi-main/src/mcp/tools/daohang_dianti/tools.py
+  
+  #在该文件的第10至第13行，选择拉起的导航点程序，以及启动该程序的编译器路径
+  PythonProject/daohang/daohang-dianti.py
+  
+  #在该文件修改目标点的坐标
+  PythonProject/point_nav/point1.py
+  ```
+
+- 启动语音程序
+  ``` bash
+  cd PythonProject/py-xiaozhi-main/
+  python3 main.py
+  ```
+实现语音交互导航需要同时开启语音、运控、导航。
 
 ## 公司招聘
 招聘岗位：  
