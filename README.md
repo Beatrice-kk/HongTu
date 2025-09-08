@@ -161,7 +161,7 @@
     </td>
     <!-- 第二张图：与第一张保持相同宽度 -->
     <td style="padding: 0 10px; text-align: center;">
-      <img src="dayiqun.jpeg" alt="dayiqun" width="300" style="height: auto;">
+      <img src="qun.jpg" alt="dayiqun" width="300" style="height: auto;">
     </td>
   </tr>
 </table>
