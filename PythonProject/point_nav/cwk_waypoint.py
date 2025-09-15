@@ -80,7 +80,7 @@ class NavPointSequence:
         goal.target_pose = pose_stamped
         return goal
 
-    def find_nearest_feasible_around(self, orig_wp: tuple, search_radius=0.3, step=0.1, angles=24) -> tuple or None:
+    def find_nearest_feasible_around(self, orig_wp: tuple, search_radius=0.3, step=0.1, angles=24) -> tuple|None:
         """
         在原始航点附近进行环形采样，寻找一个可行的导航点。
         :param orig_wp: 原始航点 (x, y, yaw)。
