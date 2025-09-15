@@ -1,0 +1,38 @@
+# ROS build files
+build/
+devel/
+install/
+
+# CMake build artifacts
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Catkin workspace
+catkin_ws/
+
+# ROS log files
+*.log
+rosout.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# VSCode settings
+.vscode/
+
+# JetBrains IDE
+.idea/
+
+# Misc
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Environment files
+.env
+*.env
