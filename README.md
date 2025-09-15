@@ -40,19 +40,14 @@
 
 - 编译程序
   ``` bash
-  cd HongTu/G1Nav2D/
-  catkin_make
-  
-  #遇到报错可先执行以下命令
   cd HongTu/G1Nav2D/src/livox_ros_driver2-master/
   ./build.sh ROS1
-  cd HongTu/G1Nav2D/
-  catkin_make
   ```
 
 - 安装依赖包
   ``` bash
-  sudo apt install ros-noetic-teb-local-planner ros-noetic-global-planner ros-noetic-costmap-server
+  <!-- sudo apt install ros-noetic-teb-local-planner ros-noetic-global-planner ros-noetic-costmap-server -->
+  unitree@ubuntu:~/HongTu/G1Nav2D/src/livox_ros_driver2-master$ sudo apt install ros-noetic-teb-local-planner ros-noetic-global-planner ros-noetic-costmap-2d ros-noetic-costmap-server
   ```
 
 - 建图及保存

@@ -24,6 +24,8 @@ class CmdVelController:
         rospy.loginfo("Subscribed to /cmd_vel")
 
         # 订阅全局路径
+
+        
         rospy.Subscriber("/move_base/GlobalPlanner/plan", Path, self.path_callback)
         rospy.loginfo("Subscribed to global path topic /move_base/GlobalPlanner/plan")
 
@@ -56,17 +58,22 @@ class CmdVelController:
 
         rospy.loginfo(f"Received cmd_vel: vx={vx:.2f}, vy={vy:.2f}, wz={wz:.2f}")
         try:
+            #暴露的move接口
             self.sport_client.Move(vx, vy, wz)
         except Exception as e:
             rospy.logerr(f"Failed to send Move command: {e}")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(f"Usage: rosrun your_package cmd_vel_control.py networkInterface")
-        sys.exit(-1)
+   #  if len(sys.argv) < 2:
+   #      print(f"Usage: rosrun your_package cmd_vel_control.py networkInterface")
+   #      sys.exit(-1)
 
-    network_interface = sys.argv[1]
+   #  network_interface = sys.argv[1]
+
+      #   看具体网卡的名称 
+    network_interface = "eth0"  
+
 
     rospy.init_node("unitree_cmd_vel_controller", anonymous=False)
     rospy.logwarn("Make sure the robot is in a safe environment before sending cmd_vel commands!")

@@ -1,0 +1,4 @@
+<launch>
+    <node pkg="g1_pose" type="lidar_pose_node" name="lidar_pose_node" output="screen">
+    </node>
+</launch>

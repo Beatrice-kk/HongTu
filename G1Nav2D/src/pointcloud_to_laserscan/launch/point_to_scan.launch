@@ -36,8 +36,14 @@
  <remap from="cloud_in" to="/base_link_cloud"/> 
  
  <param name="transform_tolerance" value="0.01" />
+ <!-- <param name="min_height" value="-1" />
+ <param name="max_height" value="0.15" /> -->
+ 
+<!-- maybe33eeeeeeeeeeeeeeeeeeeeeeeeeeeeee  要看点云参考系  具体调 -->
+
  <param name="min_height" value="-1" />
  <param name="max_height" value="0.15" />
+
  <param name="angle_min" value="-3.1425926" />
  <param name="angle_max" value="3.1415926" />
  <param name="angle_increment" value="0.007" />

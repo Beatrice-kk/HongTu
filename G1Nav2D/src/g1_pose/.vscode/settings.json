@@ -1,0 +1,16 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/ubuntu/zjut_deus_sentry_nav_cwk/devel/lib/python3/dist-packages",
+        "/home/ubuntu/Fast-Drone-250/devel/lib/python3/dist-packages",
+        "/home/ubuntu/ws_livox/devel/lib/python3/dist-packages",
+        "/opt/ros/noetic/lib/python3/dist-packages",
+        "/usr/bin/python3"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/ubuntu/zjut_deus_sentry_nav_cwk/devel/lib/python3/dist-packages",
+        "/home/ubuntu/Fast-Drone-250/devel/lib/python3/dist-packages",
+        "/home/ubuntu/ws_livox/devel/lib/python3/dist-packages",
+        "/opt/ros/noetic/lib/python3/dist-packages",
+        "/usr/bin/python3"
+    ]
+}

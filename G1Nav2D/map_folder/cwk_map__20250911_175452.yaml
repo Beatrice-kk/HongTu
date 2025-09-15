@@ -1,0 +1,7 @@
+image: /home/unitree/HongTu/G1Nav2D/map_folder/cwk_map__20250911_175452.pgm
+resolution: 0.050000
+origin: [-4.600000, -4.000000, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+
