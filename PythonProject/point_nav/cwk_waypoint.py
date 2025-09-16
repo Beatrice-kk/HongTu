@@ -7,7 +7,7 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from nav_msgs.msg import Odometry
 from nav_msgs.srv import GetPlan, GetPlanRequest
 from geometry_msgs.msg import PoseStamped, Pose
-
+from typing import Optional
 class NavPointSequence:
     def __init__(self, waypoints):
         """
@@ -46,10 +46,7 @@ class NavPointSequence:
 
     def is_feasible(self, start_pose: PoseStamped, goal_pose: PoseStamped) -> bool:
         """
-        通过调用 make_plan 服务检查路径是否可行。
-        :param start_pose: 起始位姿。
-        :param goal_pose: 目标位姿。
-        :return: 如果存在路径则返回 True，否则返回 False。
+         查看路径是否可行
         """
         try:
             # rospy.ServiceProxy 期望将请求的字段作为独立的参数传递，
@@ -80,11 +77,10 @@ class NavPointSequence:
         goal.target_pose = pose_stamped
         return goal
 
-    def find_nearest_feasible_around(self, orig_wp: tuple, search_radius=0.3, step=0.1, angles=24) -> tuple|None:
+    def find_nearest_feasible_around(self, orig_wp: tuple, search_radius=0.3, step=0.1, angles=24) -> Optional[tuple]:
         """
-        在原始航点附近进行环形采样，寻找一个可行的导航点。
-        :param orig_wp: 原始航点 (x, y, yaw)。
-        :return: 如果找到，返回新的可行航点 (x, y, yaw)，否则返回 None。
+       环形采样 可行的航点
+
         """
         x0, y0, yaw = orig_wp
         start_pose = PoseStamped()
@@ -112,7 +108,7 @@ class NavPointSequence:
         rospy.logerr(f"[补偿] 在航点 ({x0:.2f}, {y0:.2f}) 附近 {search_radius}m 范围内未找到可行点。")
         return None
 
-    def get_feasible_nearest_waypoint(self) -> tuple|None:
+    def get_feasible_nearest_waypoint(self) -> Optional[tuple]:
         """
        寻找最近的可行航点。
         """

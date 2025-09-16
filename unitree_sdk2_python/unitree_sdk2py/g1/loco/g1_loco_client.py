@@ -64,6 +64,16 @@ class LocoClient(Client):
         code, data = self._Call(ROBOT_API_ID_LOCO_SET_VELOCITY, parameter)
         return code
     
+
+   # 7107
+    def SetSpeedMode(self, speed_mode: int):
+        p = {}
+        p["data"] = speed_mode
+        parameter = json.dumps(p)
+        code, data = self._Call(ROBOT_API_ID_LOCO_SET_SPEED_MODE, parameter)
+        return code
+    
+
     # 7106
     def SetTaskId(self, task_id: float):
         p = {}
@@ -75,6 +85,10 @@ class LocoClient(Client):
     def Damp(self):
         self.SetFsmId(1)
     
+    def StandUp(self):
+        self.SetFsmId(4)
+
+
     def Start(self):
         self.SetFsmId(200)
 
@@ -93,6 +107,21 @@ class LocoClient(Client):
     def ZeroTorque(self):
         self.SetFsmId(0)
 
+
+
+    def WalkMotion(self):
+        self.SetFsmId(500)
+
+    def WalkMotion_3Dof_waist(self):
+        self.SetFsmId(501)
+
+    def Run(self):
+        self.SetFsmId(800)
+
+    def WalkRun(self):
+        self.SetFsmId(801)
+
+
     def StopMove(self):
         self.SetVelocity(0., 0., 0.)
 
@@ -104,9 +133,15 @@ class LocoClient(Client):
         UINT32_MIN = 0
         self.SetStandHeight(UINT32_MIN)
 
+    def Move_Run(self, vx: float, vy: float, vyaw: float, continous_move: bool = False):
+        duration = 864000.0 if continous_move else 1
+        self.WalkRun()
+        self.SetVelocity(vx, vy, vyaw, duration)
+
     def Move(self, vx: float, vy: float, vyaw: float, continous_move: bool = False):
         duration = 864000.0 if continous_move else 1
         self.SetVelocity(vx, vy, vyaw, duration)
+
 
     def BalanceStand(self, balance_mode: int):
         self.SetBalanceMode(balance_mode)

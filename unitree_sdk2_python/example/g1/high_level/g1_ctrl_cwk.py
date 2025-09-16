@@ -43,6 +43,7 @@ class CmdVelController:
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
 
+        self.sport_client.SetSpeedMode()
         # --- ROS 接口 ---
         rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=1)
         rospy.Subscriber("/move_base/GlobalPlanner/plan", Path, self.path_callback, queue_size=1)
@@ -104,7 +105,9 @@ class CmdVelController:
         self.last_valid_cmd_time = rospy.Time.now()
         rospy.loginfo_throttle(1.0, f"Executing cmd_vel: vx={vx:.2f}, vy={vy:.2f}, wz={wz:.2f}")
         try:
-            self.sport_client.Move(vx, vy, wz)
+            # self.sport_client.Move(vx, vy, wz)
+            self.sport_client.Move_Run(vx, vy, wz)
+
         except Exception as e:
             rospy.logerr(f"Failed to send Move command: {e}")
 
@@ -119,7 +122,7 @@ class CmdVelController:
         """发送明确的停止指令并清空历史角速度，以防影响下一次判断。"""
         rospy.loginfo("Executing FORCE STOP.")
         try:
-            self.sport_client.Move(0, 0, 0)
+            self.sport_client.StopMove()
         except Exception as e:
             rospy.logerr(f"Failed to send stop command: {e}")
         self.wz_buffer.clear()
