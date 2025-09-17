@@ -57,6 +57,8 @@ class NavPointSequence:
         except rospy.ServiceException as e:
             rospy.logerr(f"make_plan 服务调用失败: {e}")
             return False
+         
+         
     def build_pose_stamped(self, x: float, y: float, yaw_deg: float) -> PoseStamped:
         """根据x, y, yaw构建PoseStamped消息。"""
         pose = PoseStamped()
@@ -71,11 +73,6 @@ class NavPointSequence:
         pose.pose.orientation.w = q[3]
         return pose
     
-    def build_move_base_goal(self, pose_stamped: PoseStamped) -> MoveBaseGoal:
-        """根据PoseStamped构建MoveBaseGoal消息。"""
-        goal = MoveBaseGoal()
-        goal.target_pose = pose_stamped
-        return goal
 
     def find_nearest_feasible_around(self, orig_wp: tuple, search_radius=0.3, step=0.1, angles=24) -> Optional[tuple]:
         """

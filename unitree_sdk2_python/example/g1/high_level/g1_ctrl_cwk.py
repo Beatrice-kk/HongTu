@@ -36,15 +36,22 @@ class CmdVelController:
         self.cooldown_active: bool = False
         self.cooldown_end_time: rospy.Time = rospy.Time.now()
 
-        # --- Unitree SDK 初始化 ---
+
+         #sdk   相关
         rospy.loginfo("Initializing Unitree LocoClient...")
         ChannelFactoryInitialize(0, network_interface)
         self.sport_client = LocoClient()
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
 
-        self.sport_client.SetSpeedMode()
-        # --- ROS 接口 ---
+      #  选择一个步态
+      #   self.sport_client.WalkMotion()
+
+        self.sport_client.WalkRun()
+
+        
+        
+      #   self.sport_client.SetSpeedMode()
         rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=1)
         rospy.Subscriber("/move_base/GlobalPlanner/plan", Path, self.path_callback, queue_size=1)
         self.stop_timer = rospy.Timer(rospy.Duration(0.5), self.check_cmd_timeout)
@@ -82,7 +89,7 @@ class CmdVelController:
         # 2. 检查路径是否有效
         if not self.path_is_valid:
             rospy.logwarn_throttle(1.0, "Global path not received or empty. Ignoring cmd_vel.")
-            self.force_stop()
+            self.force_stop() 
             return
         
         vx, vy, wz = msg.linear.x, msg.linear.y, msg.angular.z
@@ -105,8 +112,8 @@ class CmdVelController:
         self.last_valid_cmd_time = rospy.Time.now()
         rospy.loginfo_throttle(1.0, f"Executing cmd_vel: vx={vx:.2f}, vy={vy:.2f}, wz={wz:.2f}")
         try:
-            # self.sport_client.Move(vx, vy, wz)
-            self.sport_client.Move_Run(vx, vy, wz)
+            self.sport_client.Move(vx, vy, wz)
+            # self.sport_client.Move_Run(vx, vy, wz)
 
         except Exception as e:
             rospy.logerr(f"Failed to send Move command: {e}")
