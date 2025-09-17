@@ -8,6 +8,12 @@ from nav_msgs.msg import Odometry
 from nav_msgs.srv import GetPlan, GetPlanRequest
 from geometry_msgs.msg import PoseStamped, Pose
 from typing import Optional
+import sys
+import time
+sys.path.append("/home/unitree/unitree_sdk2_python/example/g1/high_level")
+# from g1_client import G1ActionPlayer
+
+import g1_client_cwk
 class NavPointSequence:
     def __init__(self, waypoints):
         """
@@ -58,7 +64,6 @@ class NavPointSequence:
             rospy.logerr(f"make_plan 服务调用失败: {e}")
             return False
          
-         
     def build_pose_stamped(self, x: float, y: float, yaw_deg: float) -> PoseStamped:
         """根据x, y, yaw构建PoseStamped消息。"""
         pose = PoseStamped()
@@ -73,7 +78,7 @@ class NavPointSequence:
         pose.pose.orientation.w = q[3]
         return pose
     
-
+    
     def find_nearest_feasible_around(self, orig_wp: tuple, search_radius=0.3, step=0.1, angles=24) -> Optional[tuple]:
         """
        环形采样 可行的航点
@@ -158,6 +163,7 @@ class NavPointSequence:
 
     def run_sequence(self):
         
+
         while not rospy.is_shutdown():
             wp = self.get_feasible_nearest_waypoint()
             if wp is None:
@@ -187,7 +193,10 @@ class NavPointSequence:
 
             rospy.loginfo("/* 开始执行指定动作... */")
 
-
+            ##  填入  具体的 动作 Action  路径
+            
+            # player=g1_client_cwk.G1ActionPlayer()
+            
             self.stabilize_position(goal, rospy.Duration(3))
 
 
@@ -205,6 +214,82 @@ class NavPointSequence:
         rospy.signal_shutdown("全部结束shusuuuuuuuuuuuuuuuuuuuuu")
 
 
+
+def simulate_button_press(remote, button_name, duration=0.2):
+    """模拟单个按键按下"""
+    print(f"🎮 模拟按下 {button_name} 按键")
+    
+    # 设置按下状态
+    setattr(remote, button_name, 1)
+    
+    # 构造无线遥控器数据
+    wireless_data = [0] * 4
+    
+    # 根据按键类型设置相应的位
+    if button_name in ['R1', 'L1', 'Start', 'Select', 'R2', 'L2', 'F1']:
+        bit_position = {'R1': 0, 'L1': 1, 'Start': 2, 'Select': 3, 
+                        'R2': 4, 'L2': 5, 'F1': 6}.get(button_name)
+        wireless_data[2] |= (1 << bit_position)
+    elif button_name in ['A', 'B', 'X', 'Y', 'Up', 'Right', 'Down', 'Left']:
+        bit_position = {'A': 0, 'B': 1, 'X': 2, 'Y': 3, 
+                        'Up': 4, 'Right': 5, 'Down': 6, 'Left': 7}.get(button_name)
+        wireless_data[3] |= (1 << bit_position)
+    
+    # 调用解析方法
+    remote.parse(wireless_data)
+    
+    # 保持按键状态一段时间
+    time.sleep(duration)
+    
+    # 释放按键
+    setattr(remote, button_name, 0)
+    
+    # 清除无线遥控器状态
+    wireless_data = [0] * 4
+    remote.parse(wireless_data)
+    
+    print(f"🎮 释放 {button_name} 按键")
+
+def simulate_combo_press(remote, button1, button2, duration=0.2):
+    """模拟组合键按下"""
+    print(f"🎮 模拟按下组合键 {button1} + {button2}")
+    
+    # 设置按下状态
+    setattr(remote, button1, 1)
+    setattr(remote, button2, 1)
+    
+    # 构造无线遥控器数据
+    wireless_data = [0] * 4
+    
+    # 根据按键类型设置相应的位
+    for button_name in [button1, button2]:
+        if button_name in ['R1', 'L1', 'Start', 'Select', 'R2', 'L2', 'F1']:
+            bit_position = {'R1': 0, 'L1': 1, 'Start': 2, 'Select': 3, 
+                            'R2': 4, 'L2': 5, 'F1': 6}.get(button_name)
+            wireless_data[2] |= (1 << bit_position)
+        elif button_name in ['A', 'B', 'X', 'Y', 'Up', 'Right', 'Down', 'Left']:
+            bit_position = {'A': 0, 'B': 1, 'X': 2, 'Y': 3, 
+                            'Up': 4, 'Right': 5, 'Down': 6, 'Left': 7}.get(button_name)
+            wireless_data[3] |= (1 << bit_position)
+    
+    # 调用解析方法
+    remote.parse(wireless_data)
+    
+    # 保持按键状态一段时间
+    time.sleep(duration)
+    
+    # 释放按键
+    setattr(remote, button1, 0)
+    setattr(remote, button2, 0)
+    
+    # 清除无线遥控器状态
+    wireless_data = [0] * 4
+    remote.parse(wireless_data)
+    
+    print(f"🎮 释放组合键 {button1} + {button2}")
+    
+    
+    
 if __name__ == "__main__":
     try:
         rospy.init_node("nav_point_sequence")
@@ -214,15 +299,22 @@ if __name__ == "__main__":
         #绝对坐标  （建图时）
         waypoints = [
             # (-1.8, -1.0, 180),
-            (-0.3, 0.3, 180),
+            (-5.238, -0.204, 117.677),
 
             # (-0.5, 0.5, 0),
-            (-0.4, 0.2, 90),
+            (1.122, -0.413, -53.2),
 
-            (-2.1, -0.1, 0),
         ]
 
         navigator = NavPointSequence(waypoints)
+        
+        g1_client_cwk.main()
+        time.sleep(5)  # 等待功能激活
+        
+        simulate_combo_press(g1_client_cwk.remote, 'X')
+        time.sleep(1)  # 等待功能激活
+
+        
         navigator.run_sequence()
         
         rospy.spin() # 保持节点运行，直到被外部关闭

@@ -19,17 +19,21 @@ TebLocalPlannerROS:
 
  # Robot
 
- max_vel_x: 1.0
- max_vel_x_backwards: 0.05
+ max_vel_x: 2.3
+ max_vel_x_backwards: 0.1
  max_vel_y: 0.0
- max_vel_theta: 0.5
- acc_lim_x: 0.5
- acc_lim_theta: 0.5
+ max_vel_theta: 1.5
+ acc_lim_x: 1.2
+ acc_lim_theta: 0.8
  min_turning_radius: 0.0 # diff-drive robot (can turn on place!)
 
  footprint_model: # types: "point", "circular", "two_circles", "line", "polygon"
    type: "line"
-   radius: 0.36 # for type "circular"
+
+
+   radius: 0.28 # for type "circular"
+
+
    line_start: [0.0, 0.0] # for type "line"
    line_end: [0.2, 0.0] # for type "line"
    front_offset: 0.2 # for type "two_circles"

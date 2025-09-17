@@ -45,9 +45,9 @@ class CmdVelController:
         self.sport_client.Init()
 
       #  选择一个步态
-      #   self.sport_client.WalkMotion()
+        self.sport_client.WalkMotion()
 
-        self.sport_client.WalkRun()
+      #   self.sport_client.WalkRun()
 
         
         
