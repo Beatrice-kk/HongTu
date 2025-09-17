@@ -163,6 +163,7 @@ class NavPointSequence:
 
     def run_sequence(self):
         
+        index=0
 
         while not rospy.is_shutdown():
             wp = self.get_feasible_nearest_waypoint()
@@ -193,9 +194,9 @@ class NavPointSequence:
 
             rospy.loginfo("/* 开始执行指定动作... */")
 
-            ##  填入  具体的 动作 Action  路径
             
-            # player=g1_client_cwk.G1ActionPlayer()
+            ### 在这里按照顺序进行
+            
             
             self.stabilize_position(goal, rospy.Duration(3))
 
@@ -308,11 +309,7 @@ if __name__ == "__main__":
 
         navigator = NavPointSequence(waypoints)
         
-        g1_client_cwk.main()
-        time.sleep(5)  # 等待功能激活
-        
-        simulate_combo_press(g1_client_cwk.remote, 'X')
-        time.sleep(1)  # 等待功能激活
+      
 
         
         navigator.run_sequence()
