@@ -43,3 +43,5 @@ if __name__ == '__main__':
     rospy.init_node('slam_reloc_from_rviz')
     SlamRelocFromRViz()
     rospy.spin()
+
+

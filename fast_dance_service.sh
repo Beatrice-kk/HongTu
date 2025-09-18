@@ -1,0 +1,1 @@
+python3 /home/unitree/unitree_sdk2_python/example/g1/high_level/g1_client_cwk.py

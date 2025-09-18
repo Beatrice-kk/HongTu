@@ -3,12 +3,9 @@
 
 import rospy
 import math
-import os
-import threading
 import tf.transformations as tft
-from move_base_msgs.msg import MoveBaseActionGoal, MoveBaseActionFeedback
-from std_msgs.msg import Header
-# from playsound import playsound
+from geometry_msgs.msg import PoseStamped
+from move_base_msgs.msg import MoveBaseActionFeedback
 
 
 class NavWaypointPlayer:
@@ -21,10 +18,10 @@ class NavWaypointPlayer:
         self.threshold = threshold
         self.current_waypoint_index = 0
         self.reached_final = False
-        self.waiting_time = 2.0  # Seconds to wait between waypoints
+        self.waiting_time = 30.0  # Seconds to wait between waypoints
 
-        # 发布导航目标（MoveBaseActionGoal）
-        self.goal_pub = rospy.Publisher("/move_base/goal", MoveBaseActionGoal, queue_size=1)
+        # 发布导航目标 (PoseStamped)
+        self.goal_pub = rospy.Publisher("/move_base_simple/goal", PoseStamped, queue_size=1)
         # 订阅 /move_base/feedback 获取当前位姿
         self.feedback_sub = rospy.Subscriber("/move_base/feedback", MoveBaseActionFeedback, self.feedback_callback)
 
@@ -35,21 +32,20 @@ class NavWaypointPlayer:
         if self.current_waypoint_index >= len(self.waypoints):
             rospy.loginfo("[完成] 所有航点已完成!")
             self.reached_final = True
-            # rospy.signal_shutdown("任务完成")
             return
 
         x, y, theta = self.waypoints[self.current_waypoint_index]
-        
-        goal = MoveBaseActionGoal()
-        goal.goal.target_pose.header.frame_id = "map"
-        goal.goal.target_pose.header.stamp = rospy.Time.now()
-        goal.goal.target_pose.pose.position.x = x
-        goal.goal.target_pose.pose.position.y = y
+
+        goal = PoseStamped()
+        goal.header.frame_id = "map"
+        goal.header.stamp = rospy.Time.now()
+        goal.pose.position.x = x
+        goal.pose.position.y = y
         q = tft.quaternion_from_euler(0, 0, math.radians(theta))  # Convert degrees to radians
-        goal.goal.target_pose.pose.orientation.x = q[0]
-        goal.goal.target_pose.pose.orientation.y = q[1]
-        goal.goal.target_pose.pose.orientation.z = q[2]
-        goal.goal.target_pose.pose.orientation.w = q[3]
+        goal.pose.orientation.x = q[0]
+        goal.pose.orientation.y = q[1]
+        goal.pose.orientation.z = q[2]
+        goal.pose.orientation.w = q[3]
 
         rospy.loginfo(f"[导航目标 {self.current_waypoint_index+1}/{len(self.waypoints)}] x={x}, y={y}, θ={theta}")
         self.goal_pub.publish(goal)
@@ -68,10 +64,10 @@ class NavWaypointPlayer:
 
         if dist <= self.threshold:
             rospy.loginfo(f"[到达航点 {self.current_waypoint_index+1}/{len(self.waypoints)}]")
-            
+
             # Move to the next waypoint
             self.current_waypoint_index += 1
-            
+
             # Wait a bit before going to the next waypoint
             if self.current_waypoint_index < len(self.waypoints):
                 rospy.loginfo(f"等待 {self.waiting_time} 秒后前往下一个航点...")
@@ -80,21 +76,18 @@ class NavWaypointPlayer:
             else:
                 rospy.loginfo("[完成] 所有航点已完成!")
                 self.reached_final = True
-                # rospy.signal_shutdown("任务完成")
 
 
 if __name__ == "__main__":
-    rospy.init_node("nav_waypoints_player")
+    rospy.init_node("nav_waypoints_player_simple")
 
     # ===== 修改这里定义航点 =====
-    # 每个航点为 (x, y, theta) 其中 theta 为角度制
     waypoints = [
-        (-8.44, 8.89, 0),            # 航点1
-        (-5.24, -0.20, 117.68),      # 航点2
-        (1.12, -0.41, -53.2),        # 航点3
-        (0.0, 0.0, 0.0),             # 航点4 - 回到原点
+        (13.44, -0.38, -132),        # 航点1
+        (10.121, 19.70, 138),         # 航点2
+        (0.570, 1.213, 67),       # 航点3 - 回到原点
     ]
-    
+
     threshold = 0.5  # 到达目标点的距离阈值（米）
 
     node = NavWaypointPlayer(waypoints, threshold)

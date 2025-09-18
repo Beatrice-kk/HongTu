@@ -70,6 +70,15 @@ class DanceService:
             # 创建服务和订阅器
             self.dance_direction = "A"  # 默认舞蹈方向
             
+            # 若已有 play_dance 服务在运行（例如由 g1_client_cwk.py 提供），则避免重复注册
+            try:
+                rospy.wait_for_service('play_dance', timeout=0.5)
+                rospy.logwarn("检测到已有 play_dance 服务在运行，本节点不再重复提供，直接退出。")
+                rospy.signal_shutdown("duplicate play_dance service detected")
+                return
+            except rospy.ROSException:
+                pass
+
             # 创建舞蹈播放服务
             self.play_dance_service = rospy.Service(
                 'play_dance', 
