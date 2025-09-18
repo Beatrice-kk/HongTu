@@ -1,10 +1,23 @@
 <launch>
+    <!-- 定义参数，默认启动 rviz -->
+    <arg name="use_rviz" default="true" />
 
+    <!-- 启动 livox_ros_driver2 -->
     <include file="$(find livox_ros_driver2)/launch_ROS1/msg_MID360.launch">
     </include>
+
+    <!-- 加载 fastlio 配置 -->
     <rosparam command="load" file="$(find fastlio)/config/mapping.yaml" />
+
+    <!-- 启动 fastlio -->
     <node pkg="fastlio" type="map_builder_node" name="map_builder_node" output="screen"/>
-    <!--<include file="$(find tool)/launch/livox2velodyne.launch"/>-->
+
+    <!-- octomap server -->
     <include file="$(find fastlio)/launch/octomap_server.launch"/>
-    <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find fastlio)/rviz/mapping.rviz" />
+
+    <!-- 按参数决定是否启动 rviz -->
+    <group if="$(arg use_rviz)">
+        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz"
+              args="-d $(find fastlio)/rviz/mapping.rviz" />
+    </group>
 </launch>

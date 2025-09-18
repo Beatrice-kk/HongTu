@@ -93,35 +93,34 @@ class DanceController:
             print(f"❌ 回调错误: {e}")
     
     def play_dance(self, direction, speed=1.0, wait_for_completion=True):
-      #   """
-      #   播放指定方向的舞蹈
+        """
+        播放指定方向的舞蹈
         
-      #   参数:
-      #       direction: 'Up', 'Down', 'Left', 'Right', 'A', 'B', 'X', 'Y'
-      #       speed: 速度倍数（默认：1.0）
-      #       wait_for_completion: 是否等待舞蹈完成
+        参数:
+            direction: 'Up', 'Down', 'Left', 'Right', 'A', 'B', 'X', 'Y'
+            speed: 速度倍数（默认：1.0）
+            wait_for_completion: 是否等待舞蹈完成
             
-      #   返回:
-      #       如果舞蹈成功启动返回True，否则返回False
-      #   """
-      #   # 开始舞蹈
-      #   result = self.player.play_action(direction, speed)
+        返回:
+            如果舞蹈成功启动返回True，否则返回False
+        """
+        # 开始舞蹈
+        result = self.player.play_action(direction, speed)
         
-      #   if not result:
-      #       print(f"❌ 播放舞蹈失败: {direction}")
-      #       return False
+        if not result:
+            print(f"❌ 播放舞蹈失败: {direction}")
+            return False
             
-      #   print(f"▶️ 正在播放舞蹈: {direction}")
+        print(f"▶️ 正在播放舞蹈: {direction}")
         
-      #   # 如果请求等待完成
-      #   if wait_for_completion:
-      #       print("⏳ 等待舞蹈完成...")
-      #       while self.player.state != "stopped":
-      #           time.sleep(0.1)
-      #       print("✅ 舞蹈完成")
+        # 如果请求等待完成
+        if wait_for_completion:
+            print("⏳ 等待舞蹈完成...")
+            while self.player.state != "stopped":
+                time.sleep(0.1)
+            print("✅ 舞蹈完成")
             
-      #   return True
-      pass
+        return True
     
     def stop_dance(self):
         """停止当前舞蹈"""
