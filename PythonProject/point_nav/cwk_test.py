@@ -7,112 +7,178 @@ import os
 import threading
 import tf.transformations as tft
 from move_base_msgs.msg import MoveBaseActionGoal, MoveBaseActionFeedback
-from std_msgs.msg import Header
+from std_msgs.msg import Header, String
+from std_srvs.srv import Trigger
 # from playsound import playsound
-from nav_msgs.msg import Odometry
 
-class NavPointPlayer:
-    def __init__(self, target_x, target_y, target_theta, threshold=0.5):
-        self.target_x = target_x
-        self.target_y = target_y
-        self.target_theta = target_theta
-      #   self.audio_file = audio_file
+
+class NavWaypointPlayer:
+    def __init__(self, waypoints, dance_directions=None, threshold=0.5):
+        """
+        使用航点列表初始化。
+        每个航点是一个(x, y, theta)元组
+        
+        参数:
+            waypoints: (x, y, theta)元组的列表
+            dance_directions: 在每个航点执行的舞蹈方向列表(可选)
+            threshold: 认为到达航点的距离阈值(米)
+        """
+        self.waypoints = waypoints
         self.threshold = threshold
-        self.reached = False
-
+        self.current_waypoint_index = 0
+        self.reached_final = False
+        self.waiting_time = 2.0  # 航点间等待的秒数
+        
+        # 舞蹈配置
+        self.dance_directions = dance_directions or ['A'] * len(waypoints)  # 如果未指定则使用默认舞蹈
+        self.dance_in_progress = False
+        
         # 发布导航目标（MoveBaseActionGoal）
         self.goal_pub = rospy.Publisher("/move_base/goal", MoveBaseActionGoal, queue_size=1)
-        # 订阅 /move_base/feedback and   slam_odom   获取当前位姿
-
-
-        self.odom_sub=rospy.Subscriber('/slam_odom', Odometry, self.slam_odom_callback, queue_size=10)
-
-      #   self.feedback_sub = rospy.Subscriber("/move_base/feedback", MoveBaseActionFeedback, self.feedback_callback)
-
+        # 订阅 /move_base/feedback 获取当前位姿
+        self.feedback_sub = rospy.Subscriber("/move_base/feedback", MoveBaseActionFeedback, self.feedback_callback)
+        
+        # 舞蹈服务客户端
+        rospy.loginfo("等待舞蹈服务...")
+        self.dance_direction_pub = rospy.Publisher('dance_direction', String, queue_size=1)
+        try:
+            rospy.wait_for_service('play_dance', timeout=5.0)
+            self.play_dance_service = rospy.ServiceProxy('play_dance', Trigger)
+            rospy.loginfo("舞蹈服务已连接")
+        except rospy.ROSException:
+            rospy.logwarn("舞蹈服务不可用，将不执行舞蹈动作")
+            self.play_dance_service = None
+        
         rospy.sleep(1.0)  # 等待topic连接
-        self.publish_goal()
+        self.navigate_to_current_waypoint()
 
-    def publish_goal(self):
+    def navigate_to_current_waypoint(self):
+        if self.current_waypoint_index >= len(self.waypoints):
+            rospy.loginfo("[完成] 所有航点已完成!")
+            self.reached_final = True
+            # rospy.signal_shutdown("任务完成")
+            return
+
+        x, y, theta = self.waypoints[self.current_waypoint_index]
+        
         goal = MoveBaseActionGoal()
         goal.goal.target_pose.header.frame_id = "map"
         goal.goal.target_pose.header.stamp = rospy.Time.now()
-        goal.goal.target_pose.pose.position.x = self.target_x
-        goal.goal.target_pose.pose.position.y = self.target_y
-        q = tft.quaternion_from_euler(0, 0, self.target_theta)
+        goal.goal.target_pose.pose.position.x = x
+        goal.goal.target_pose.pose.position.y = y
+        q = tft.quaternion_from_euler(0, 0, math.radians(theta))  # 将角度转换为弧度
         goal.goal.target_pose.pose.orientation.x = q[0]
         goal.goal.target_pose.pose.orientation.y = q[1]
         goal.goal.target_pose.pose.orientation.z = q[2]
         goal.goal.target_pose.pose.orientation.w = q[3]
 
-        rospy.loginfo(f"[导航目标] x={self.target_x}, y={self.target_y}, θ={self.target_theta}")
+        rospy.loginfo(f"[导航目标 {self.current_waypoint_index+1}/{len(self.waypoints)}] x={x}, y={y}, θ={theta}")
         self.goal_pub.publish(goal)
 
+    def perform_dance(self):
+        """调用舞蹈服务执行舞蹈动作"""
+        if self.play_dance_service is None:
+            rospy.logwarn("舞蹈服务不可用，跳过舞蹈")
+            return True
+        
+        try:
+            # 获取当前航点的舞蹈方向
+            if self.current_waypoint_index < len(self.dance_directions):
+                dance_direction = self.dance_directions[self.current_waypoint_index]
+            else:
+                dance_direction = 'A'  # 默认舞蹈
+            
+            rospy.loginfo(f"开始执行舞蹈: {dance_direction}")
+            
+            # 发布舞蹈方向
+            self.dance_direction_pub.publish(String(dance_direction))
+            rospy.sleep(0.5)  # 等待方向设置生效
+            
+            # 调用舞蹈服务
+            response = self.play_dance_service()
+            
+            if response.success:
+                rospy.loginfo(f"舞蹈执行成功: {response.message}")
+                return True
+            else:
+                rospy.logwarn(f"舞蹈执行失败: {response.message}")
+                return False
+                
+        except rospy.ServiceException as e:
+            rospy.logerr(f"舞蹈服务调用失败: {e}")
+            return False
 
-    def slam_odom_callback(self, msg):
-        if self.reached:
+    def feedback_callback(self, msg):
+        if self.reached_final or self.dance_in_progress:
             return
 
-        current_pose = msg.pose.pose
-        dx = current_pose.position.x - self.target_x
-        dy = current_pose.position.y - self.target_y
+        current_pose = msg.feedback.base_position.pose
+        x, y, _ = self.waypoints[self.current_waypoint_index]
+        dx = current_pose.position.x - x
+        dy = current_pose.position.y - y
         dist = math.hypot(dx, dy)  # 欧氏距离
 
         rospy.loginfo_throttle(2, f"[当前位置] ({current_pose.position.x:.2f}, {current_pose.position.y:.2f}) -> 距离目标 {dist:.2f} m")
 
         if dist <= self.threshold:
-            self.reached = True
-            rospy.logerr('/* log 到啦啦啦啦啦啦啦啦啦啦啦啦啦啦啦啦啦*/')
+            rospy.loginfo(f"[到达航点 {self.current_waypoint_index+1}/{len(self.waypoints)}]")
+            
+            # 在此航点执行舞蹈
+            self.dance_in_progress = True
+            
+            # 创建一个线程来执行舞蹈，这样不会阻塞反馈处理
+            dance_thread = threading.Thread(target=self._execute_dance_and_continue)
+            dance_thread.daemon = True
+            dance_thread.start()
 
-   #  def feedback_callback(self, msg):
-   #      if self.reached:
-   #          return
+    def _execute_dance_and_continue(self):
+        """在单独的线程中执行舞蹈，然后继续导航"""
+        try:
+            # 执行舞蹈动作
+            rospy.loginfo("/* 开始执行指定舞蹈动作... */")
+            dance_success = self.perform_dance()
+            rospy.loginfo("/* 舞蹈动作执行完毕 */")
+            
+            # 前往下一个航点
+            self.current_waypoint_index += 1
+            
+            # 等待一段时间后继续
+            if self.current_waypoint_index < len(self.waypoints):
+                rospy.loginfo(f"等待 {self.waiting_time} 秒后前往下一个航点...")
+                rospy.sleep(self.waiting_time)
+                self.navigate_to_current_waypoint()
+            else:
+                rospy.loginfo("[完成] 所有航点已完成!")
+                self.reached_final = True
+                # rospy.signal_shutdown("任务完成")
+            
+        except Exception as e:
+            rospy.logerr(f"舞蹈执行线程错误: {e}")
+        finally:
+            self.dance_in_progress = False
 
-   #      current_pose = msg.feedback.base_position.pose
-   #      dx = current_pose.position.x - self.target_x
-   #      dy = current_pose.position.y - self.target_y
-   #      dist = math.hypot(dx, dy)  # 欧氏距离
-
-   #      rospy.loginfo_throttle(2, f"[当前位置] ({current_pose.position.x:.2f}, {current_pose.position.y:.2f}) -> 距离目标 {dist:.2f} m")
-
-   #      if dist <= self.threshold:
-   #          # rospy.loginfo("[到达目标] 播放音频...")
-   #          self.reached = True
-   #          rospy.logerr('/* log 到啦啦啦啦啦啦啦啦啦啦啦啦啦啦啦啦啦*/')
-
-
-   #          # self.play_audio()
-
-   #  def play_audio(self):
-   #      def _play():
-   #          abs_path = os.path.abspath(self.audio_file)
-   #          try:
-   #              playsound(abs_path)  # 阻塞直到播放完成
-   #              rospy.loginfo("[完成] 音频播放结束，退出程序。")
-   #              rospy.signal_shutdown("任务完成")
-   #          except Exception as e:
-   #              rospy.logerr(f"[错误] 音频播放失败: {e}")
-
-   #      t = threading.Thread(target=_play)
-   #      t.start()
 
 if __name__ == "__main__":
-    rospy.init_node("nav_point_player")
+    rospy.init_node("nav_waypoints_player")
 
-    # ===== 修改这里即可 =====
-#    target_x = 1.50857
-#    target_y = 0.30229
-#    target_theta = 0
-    target_x = 0.0
-    target_y = 0.0
-    #正前方为+-180    左负 右正
-    target_yaw=-90
-   #  target_theta = 3.14* (target_yaw/180)
-    target_theta = math.radians(target_yaw)  
-
-#    target_theta = -3.037
+    # 每个航点为 (x, y, theta) 其中 theta 为角度制
+    waypoints = [
+        (0.18, -0.7,-179),
+      #   (4.18, 1.15,-159),
+        
+        (-5.238, -0.204, 117.677),
+        (1.122, -0.413, -53.2),
+      #   (0.0, 0.0, 0.0),             # 航点3 - 回到原点
+    ]
     
-   #  audio_file = "/home/zhuo/point_nav/audio/weishengjian.mp3"
-    threshold = 0.2
+    # 可选: 'Up', 'Down', 'Left', 'Right', 'A', 'B', 'X', 'Y'
+    dance_directions = [
+        'A',           # 第1个航点执行 'A' 舞蹈
+        'B',           # 第2个航点执行 'B' 舞蹈
+        'Up',          # 第3个航点执行 'Up' 舞蹈
+    ]
+    
+    threshold = 0.5  # 到达目标点的距离阈值（米）
 
-    node = NavPointPlayer(target_x, target_y, target_theta,  threshold)
+    node = NavWaypointPlayer(waypoints, dance_directions, threshold)
     rospy.spin()
