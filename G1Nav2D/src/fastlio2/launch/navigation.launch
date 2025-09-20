@@ -1,4 +1,8 @@
 <launch>
+
+     <!-- 启动运控 -->
+    <node pkg="fastlio" type="g1_ctrl_cwk.py" name="g1_ctrl_cwk" cwd="node" output="screen"/>
+
     <node pkg="tf" type="static_transform_publisher" name="base_to_body" args="0.0 0 0.0 3.1416 3.1416 0 /body /base_link 1" /> 
     <include file="$(find livox_ros_driver2)/launch_ROS1/msg_MID360.launch">
     </include>
@@ -6,7 +10,7 @@
     <node pkg="fastlio" type="localizer_node" name="localizer_node" output="screen"/>
 
 
-    <arg name="pcd_path" default="map_2025-09-18_15-46-01.pcd" />
+    <arg name="pcd_path" default="platform_1.pcd" />
     <arg name="pcd_dir" default="/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD" />
 
     <node pkg="fastlio" type="slam_reloc.py" name="slam_reloc" output="screen">
@@ -14,7 +18,7 @@
     </node>
 
 
-    <arg name="map_file" default="cwk_map__20250918_155202.yaml" />
+    <arg name="map_file" default="platform_1.yaml" />
 
     <include file="$(find fastlio)/launch/gridmap_load.launch">
             <arg name="rviz" value="false"/>
@@ -23,7 +27,7 @@
 
     </include>
 
-    <arg name="ground_map_path" default="ground_map_2025-09-18_15-46-01.pcd" />
+    <arg name="ground_map_path" default="ground_platform_1.pcd" />
     <arg name="ground_map_dir" default="/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD" />
 
     <include file="$(find tool)/launch/downsample_pointcloud.launch">

@@ -39,6 +39,14 @@ roslaunch ros_map_edit map_edit.launch
 
 ```bash
 roslaunch fastlio navigation.launch
+
+or
+
+roslaunch fastlio navigation.launch use_rviz:=false
+
+查看后台日志（遥控器启动）： tail -f /home/unitree/HongTu/PythonProject/point_nav/logs/fastlio_*.log
+
+后续想看可视化界面可以：rviz -d $(rospack find fastlio)/rviz/localize.rviz
 ```
 - 启动后需根据实际雷达位置重定位。
 

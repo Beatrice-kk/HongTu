@@ -1,0 +1,6 @@
+   
+<launch>
+   <node pkg="fastlio" type="g1_ctrl_cwk.py" name="g1_ctrl_cwk" cwd="node" output="screen"/>
+   <!-- <node pkg="roslaunch" type="python" name="g1_ctrl_cwk" args="/home/unitree/HongTu/unitree_sdk2_python/example/g1/high_level/g1_ctrl_cwk.py" cwd="node" output="screen"/> -->
+<!-- <node pkg="rosrun" type="rosrun" name="g1_ctrl_cwk" args="unitree_sdk2_python g1_ctrl_cwk.py" cwd="node" output="screen"/> -->
+</launch>
