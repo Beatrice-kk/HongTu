@@ -11,15 +11,13 @@ from std_srvs.srv import SetBool, SetBoolResponse
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize
 from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
 
-
 class CmdVelController:
     """
     Controller for Unitree G1 robot with dynamic rotation control
     """
-
     def __init__(self, network_interface: str):
         rospy.loginfo("Initializing Unitree Controller with Oscillation Detection...")
-
+        
         # --- 参数初始化 ---
         self._load_ros_params()
 
@@ -50,32 +48,23 @@ class CmdVelController:
 
         # 选择步态
         self.sport_client.WalkMotion()
-
+        
         # --- ROS接口 ---
         # 核心控制接口
         rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=1)
-        rospy.Subscriber(
-            "/move_base/GlobalPlanner/plan", Path, self.path_callback, queue_size=1
-        )
+        rospy.Subscriber("/move_base/GlobalPlanner/plan", Path, self.path_callback, queue_size=1)
         self.stop_timer = rospy.Timer(rospy.Duration(0.5), self.check_cmd_timeout)
-
+        
         # 创建旋转控制服务
-        self.rotation_service = rospy.Service(
-            "~set_rotation_enabled", SetBool, self.set_rotation_enabled
-        )
-        rospy.loginfo(
-            "Rotation control service is now available at: "
-            + rospy.get_name()
-            + "/set_rotation_enabled"
-        )
+        self.rotation_service = rospy.Service('~set_rotation_enabled', SetBool, self.set_rotation_enabled)
+        rospy.loginfo("Rotation control service is now available at: " + 
+                      rospy.get_name() + "/set_rotation_enabled")
 
     def _load_ros_params(self):
         """从 ROS 参数服务器加载所有参数。"""
         # 震荡检测参数
         self.WZ_BUFFER_SIZE = rospy.get_param("~wz_buffer_size", 6)
-        self.OSCILLATION_MAGNITUDE_THRESHOLD = rospy.get_param(
-            "~oscillation_magnitude_threshold", 0.07
-        )
+        self.OSCILLATION_MAGNITUDE_THRESHOLD = rospy.get_param("~oscillation_magnitude_threshold", 0.07)
         self.COOLDOWN_DURATION = rospy.get_param("~cooldown_duration", 3.0)
         # 速度阈值参数
         self.VEL_LINEAR_THRESHOLD = rospy.get_param("~vel_linear_threshold", 0.03)
@@ -87,12 +76,8 @@ class CmdVelController:
         """ROS服务回调，用于设置flag_rotate参数"""
         old_value = self.flag_rotate
         self.flag_rotate = 1 if req.data else 0
-        rospy.loginfo(
-            f"Rotation control changed from {old_value} to {self.flag_rotate}"
-        )
-        return SetBoolResponse(
-            success=True, message=f"Rotation control set to {self.flag_rotate}"
-        )
+        rospy.loginfo(f"Rotation control changed from {old_value} to {self.flag_rotate}")
+        return SetBoolResponse(success=True, message=f"Rotation control set to {self.flag_rotate}")
 
     def path_callback(self, msg: Path):
         """根据全局路径是否存在来更新路径有效性标志。"""
@@ -104,38 +89,32 @@ class CmdVelController:
         elif not new_path_is_valid and self.path_is_valid:
             rospy.logwarn("Global path became empty, forcing robot to stop.")
             self.force_stop()
-
+        
         self.path_is_valid = new_path_is_valid
 
     def cmd_vel_callback(self, msg: Twist):
         """处理 /cmd_vel 消息的核心回调函数。"""
         # 1. 检查是否处于冷却状态
         if self._is_in_cooldown():
-            rospy.loginfo_throttle(
-                1.0, "In cooldown after oscillation, ignoring cmd_vel."
-            )
+            rospy.loginfo_throttle(1.0, "In cooldown after oscillation, ignoring cmd_vel.")
             return
 
         # 2. 检查路径是否有效
         if not self.path_is_valid:
-            rospy.logwarn_throttle(
-                1.0, "Global path not received or empty. Ignoring cmd_vel."
-            )
-            self.force_stop()
+            rospy.logwarn_throttle(1.0, "Global path not received or empty. Ignoring cmd_vel.")
+            self.force_stop() 
             return
-
+        
         vx, vy, wz = msg.linear.x, msg.linear.y, msg.angular.z
-
+        
         # 处理旋转控制标志
         original_wz = wz
         if self.flag_rotate == 0 and abs(wz) > 0.01:
             # 当禁止旋转且有旋转指令时
             if abs(wz) > 0.5:  # 如果是大幅度旋转（约30度/秒）
-                rospy.logwarn_throttle(
-                    1.0, f"Rotation command {wz:.2f} rad/s ignored due to flag_rotate=0"
-                )
+                rospy.logwarn_throttle(1.0, f"Rotation command {wz:.2f} rad/s ignored due to flag_rotate=0")
                 wz = 0.0
-
+                
                 # 如果需要转向，优先使用侧向移动代替旋转
                 if vx > 0:  # 如果机器人正在前进
                     # 根据原始旋转方向决定侧向移动方向
@@ -151,10 +130,8 @@ class CmdVelController:
             else:
                 # 小幅度旋转可以保留，但减小幅度
                 wz *= 0.3
-                rospy.loginfo_throttle(
-                    2.0, f"Reduced rotation from {original_wz:.2f} to {wz:.2f} rad/s"
-                )
-
+                rospy.loginfo_throttle(2.0, f"Reduced rotation from {original_wz:.2f} to {wz:.2f} rad/s")
+        
         self.wz_buffer.append(wz)
 
         # 3. 检查是否发生震荡
@@ -166,21 +143,13 @@ class CmdVelController:
 
         # 4. 忽略过小的指令
         linear_vel_magnitude = math.hypot(vx, vy)
-        if (
-            linear_vel_magnitude < self.VEL_LINEAR_THRESHOLD
-            and abs(wz) < self.VEL_ANGULAR_THRESHOLD
-        ):
-            rospy.loginfo_throttle(
-                5.0,
-                f"Ignoring small cmd_vel (v={linear_vel_magnitude:.3f}, w={wz:.3f}) below threshold.",
-            )
+        if linear_vel_magnitude < self.VEL_LINEAR_THRESHOLD and abs(wz) < self.VEL_ANGULAR_THRESHOLD:
+            rospy.loginfo_throttle(5.0, f"Ignoring small cmd_vel (v={linear_vel_magnitude:.3f}, w={wz:.3f}) below threshold.")
             return
 
         # 5. 执行有效指令
         self.last_valid_cmd_time = rospy.Time.now()
-        rospy.loginfo_throttle(
-            1.0, f"Executing cmd_vel: vx={vx:.2f}, vy={vy:.2f}, wz={wz:.2f}"
-        )
+        rospy.loginfo_throttle(1.0, f"Executing cmd_vel: vx={vx:.2f}, vy={vy:.2f}, wz={wz:.2f}")
         try:
             self.sport_client.Move(vx, vy, wz)
         except Exception as e:
@@ -216,11 +185,9 @@ class CmdVelController:
         has_negative = any(wz < -0.01 for wz in self.wz_buffer)
 
         if has_positive and has_negative:
-            rospy.logwarn(
-                f"OSCILLATION PATTERN DETECTED! Recent wz: {[f'{w:.3f}' for w in self.wz_buffer]}"
-            )
+            rospy.logwarn(f"OSCILLATION PATTERN DETECTED! Recent wz: {[f'{w:.3f}' for w in self.wz_buffer]}")
             return True
-
+        
         return False
 
     def _is_in_cooldown(self) -> bool:
@@ -232,13 +199,11 @@ class CmdVelController:
                 rospy.loginfo("Cooldown finished. Resuming normal operation.")
                 self._reset_cooldown()
         return False
-
+    
     def _start_cooldown(self):
         """启动冷却状态。"""
         self.cooldown_active = True
-        self.cooldown_end_time = rospy.Time.now() + rospy.Duration(
-            self.COOLDOWN_DURATION
-        )
+        self.cooldown_end_time = rospy.Time.now() + rospy.Duration(self.COOLDOWN_DURATION)
 
     def _reset_cooldown(self):
         """重置冷却状态。"""
@@ -252,16 +217,15 @@ class CmdVelController:
         rospy.loginfo("Shutting down controller. Forcing robot to stop.")
         self.force_stop()
 
-
 if __name__ == "__main__":
     rospy.init_node("unitree_cmd_vel_controller", anonymous=False)
-
+    
     try:
         network_interface = rospy.get_param("~network_interface", "eth0")
         rospy.logwarn("Make sure the robot is in a safe environment before running!")
-
+        
         controller = CmdVelController(network_interface)
-        rospy.on_shutdown(controller.shutdown)  # 注册关闭时的回调函数
+        rospy.on_shutdown(controller.shutdown) # 注册关闭时的回调函数
         rospy.spin()
 
     except (rospy.ROSInterruptException, KeyboardInterrupt):

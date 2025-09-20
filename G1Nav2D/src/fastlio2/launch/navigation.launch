@@ -55,7 +55,7 @@
 
 
    <!-- 启动重定位 -->
-    <node pkg="fastlio" type="auto_relocalize.py" name="one_key_reloc_node" output="screen" launch-prefix="bash -c 'sleep 10; $0 $@' ">
+    <node pkg="fastlio" type="auto_relocalize.py" name="one_key_reloc_node" output="screen" launch-prefix="bash -c 'sleep 6; $0 $@' ">
     
             <rosparam command="load" file="$(find fastlio)/config/reloc.yaml" />
     </node>
