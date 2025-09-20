@@ -37,7 +37,7 @@ class NavWaypointPlayer:
         self.wait_times.append(0)
         
         # 构建完整的航点序列
-        self.original_waypoints = [backstage_pos] + dance_waypoints + [backstage_pos]
+        self.original_waypoints =dance_waypoints + [backstage_pos]
         
       #   self.original_waypoints = [backstage_pos, stage_entry_pos] + dance_waypoints + [stage_entry_pos, backstage_pos]
         self.waypoints = self.original_waypoints.copy()  # 可能会被分段修改的工作副本
@@ -345,7 +345,7 @@ class NavWaypointPlayer:
         try:
             # 修改：根据主航点索引而不是当前航点索引判断是否调用舞蹈服务
             # 第三个主航点(索引2)是第一个舞蹈点位
-            if self.current_main_waypoint_index == 3 and not self.dance_service_called:
+            if self.current_main_waypoint_index == 1 and not self.dance_service_called:
                 rospy.loginfo(f"/* 到达第一个舞蹈点位(主航点 {self.current_main_waypoint_index+1})，开始执行舞蹈动作... */")
                 self.perform_dance()
                 rospy.loginfo("/* 舞蹈指令已发送，将继续执行剩余航点 */")
@@ -532,14 +532,16 @@ if __name__ == "__main__":
                       choices=['A', 'B', 'Up', 'Down', 'Left', 'Right', 'X', 'Y'],
                       help='指定要执行的舞蹈类型')
     args, unknown = parser.parse_known_args()
-    backstage_pos =(0.0,0,0)
+    backstage_pos =(-1.65,0,0)
     stage_entry_pos = (-1.94,0.80,115)
 
     dance_choreography = {
         'A': [
-            ((-2.85, 3.0, 151), 60.0),
-            ((-2.8, 4.1, 100), 50.0),
-            ((-3.7, 2.7, 160), 70.0),
+            ((-2.85, 3.5, 160), 15.0),
+            ((-2.8, 4.1, 120), 20.0),
+            ((-3.7, 3.7, 180), 15.0),
+            ((-2.8, 4.1, 120), 20.0),
+            
         ],
         'B': [
             ((4.18, 1.15, -159), 2.0),

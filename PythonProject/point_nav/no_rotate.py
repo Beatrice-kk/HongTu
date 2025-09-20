@@ -37,7 +37,7 @@ class NavWaypointPlayer:
         self.wait_times.append(0)
         
         # 构建完整的航点序列
-        self.original_waypoints = [backstage_pos] + dance_waypoints + [backstage_pos]
+        self.original_waypoints = dance_waypoints + [backstage_pos]
         
       #   self.original_waypoints = [backstage_pos, stage_entry_pos] + dance_waypoints + [stage_entry_pos, backstage_pos]
         self.waypoints = self.original_waypoints.copy()  # 可能会被分段修改的工作副本
@@ -532,13 +532,13 @@ if __name__ == "__main__":
                       choices=['A', 'B', 'Up', 'Down', 'Left', 'Right', 'X', 'Y'],
                       help='指定要执行的舞蹈类型')
     args, unknown = parser.parse_known_args()
-    backstage_pos =(0.0,0,0)
+    backstage_pos =(-1.6,0,0)
     stage_entry_pos = (-1.94,0.80,115)
 
     dance_choreography = {
         'A': [
-            ((-2.85, 3.0, 151), 60.0),
-            ((-2.8, 4.1, 100), 50.0),
+            ((-3.35, 3.0, 151), 60.0),
+            ((-3.8, 3.8, 100), 50.0),
             ((-3.7, 2.7, 160), 70.0),
         ],
         'B': [
