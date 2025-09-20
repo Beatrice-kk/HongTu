@@ -13,6 +13,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
+from std_srvs.srv import SetBool
 
 class SimpleNavWaypointPlayer:
     def __init__(self, backstage_pos, stage_entry_pos, dance_type, dance_choreography, threshold=0.8):
@@ -101,7 +102,51 @@ class SimpleNavWaypointPlayer:
         if self.nav_watchdog_timer:
             self.nav_watchdog_timer.shutdown()
         self.nav_watchdog_timer = rospy.Timer(rospy.Duration(5.0), self.check_navigation_progress)
-    
+      
+      
+    def segment_nav_to_backstage(self, target, step_size=0.5, threshold=0.5, max_steps=20):
+      """分段导航到后台点：自动生成中间点，逐步导航"""
+      current_x = self.current_position["x"]
+      current_y = self.current_position["y"]
+      target_x, target_y, target_theta = target
+
+      path = []
+      dx = target_x - current_x
+      dy = target_y - current_y
+      dist = math.hypot(dx, dy)
+      steps = int(dist // step_size) + 1
+
+      for i in range(1, min(steps+1, max_steps+1)):
+         ratio = i / steps
+         intermediate_x = current_x + dx * ratio
+         intermediate_y = current_y + dy * ratio
+         path.append((intermediate_x, intermediate_y, target_theta))
+
+      path.append((target_x, target_y, target_theta))  # 确保最后一个点是后台点
+
+      rospy.loginfo(f"分段导航：生成{len(path)}个中间点")
+      for pt in path:
+         # 尝试导航到每个点
+         goal_msg = self._build_move_base_goal(*pt)
+         self.goal_pub.publish(goal_msg)
+         self.last_goal_send_time = rospy.Time.now()
+         self.navigation_active = True
+
+         # 等待到达或timeout
+         start_time = time.time()
+         while True:
+               dx = self.current_position["x"] - pt[0]
+               dy = self.current_position["y"] - pt[1]
+               dist = math.hypot(dx, dy)
+               if dist < threshold:
+                  rospy.loginfo(f"到达分段点: ({pt[0]:.2f}, {pt[1]:.2f})")
+                  break
+               if time.time() - start_time > 15.0:  # 每个点最多等待15s
+                  rospy.logwarn("分段点导航超时或失败，尝试下一个点")
+                  break
+               rospy.sleep(0.2)
+
+      rospy.loginfo("后台点分段导航结束")
     def check_navigation_progress(self, event):
         """Check if the robot is making progress toward its goal"""
         if not self.navigation_active or self.dance_in_progress or self.reached_final:
@@ -126,7 +171,16 @@ class SimpleNavWaypointPlayer:
             # Check if we've sent the goal recently
             if self.last_goal_send_time and (current_time - self.last_goal_send_time).to_sec() < 10.0:
                 self.goal_send_retries += 1
+                
                 if self.goal_send_retries >= self.max_goal_retries:
+                   
+                   if self.current_waypoint_index == len(self.waypoints) - 1:
+                        rospy.logwarn("后台点规划失败，启动分段导航")
+                        self.segment_nav_to_backstage(self.waypoints[self.current_waypoint_index])
+                        self.reached_final = True
+                        return
+     
+                   else:
                     self.skip_count += 1
                     rospy.logwarn(f"[导航失败] 多次尝试设置目标失败。正在强制移动到下一个路径点。已跳过{self.skip_count}个点。")
                     
@@ -270,6 +324,14 @@ class SimpleNavWaypointPlayer:
         # Determine location description
         if self.current_waypoint_index == len(self.waypoints) - 1:
             location_desc = "[返回后台]"
+            #启用旋转
+            set_rotation(True)
+        elif self.current_waypoint_index==1:
+            location_desc = f"[舞蹈位置 {self.current_waypoint_index+1}]"
+            print("到达舞台第一个点   禁用旋转")
+            set_rotation(False)
+
+            
         else:
             location_desc = f"[舞蹈位置 {self.current_waypoint_index+1}]"
 
@@ -446,8 +508,18 @@ class SimpleNavWaypointPlayer:
             dance_thread = threading.Thread(target=self.execute_dance_and_wait)
             dance_thread.daemon = True
             dance_thread.start()
+def set_rotation(enable: bool):
+    rospy.wait_for_service('/unitree_cmd_vel_controller/set_rotation_enabled')
+    try:
+        set_rotation_srv = rospy.ServiceProxy('/unitree_cmd_vel_controller/set_rotation_enabled', SetBool)
+        resp = set_rotation_srv(enable)
+        print(f"Service response: success={resp.success}, message={resp.message}")
+    except rospy.ServiceException as e:
+        print(f"Service call failed: {e}")
 
 if __name__ == "__main__":
+   
+    set_rotation(True)   #先启用 第一个点后禁用旋转
     rospy.init_node("simple_nav_waypoints_player")
     parser = argparse.ArgumentParser(description='Navigation Dance Performance Controller')
     parser.add_argument('--dance', type=str, default='A', 
@@ -460,9 +532,9 @@ if __name__ == "__main__":
 
     dance_choreography = {
         'A': [
-            ((-2.5, 4, 136), 20.0),
-            ((-3.0, 3.2, 157), 30.0),
-            ((-3.5, 2.5, 152), 20.0),
+            ((-2.5, 4, 180), 20.0),
+            ((-3.0, 3.2, 180), 30.0),
+            ((-3.5, 2.5, 180), 20.0),
         ],
         'B': [
             ((4.18, 1.15, -159), 2.0),
