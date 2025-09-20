@@ -37,10 +37,16 @@ class NavWaypointPlayer:
         self.wait_times.append(0)
         
         # 构建完整的航点序列
-        self.waypoints = [backstage_pos, stage_entry_pos] + dance_waypoints + [stage_entry_pos, backstage_pos]
+        self.original_waypoints = [backstage_pos] + dance_waypoints + [backstage_pos]
+        
+      #   self.original_waypoints = [backstage_pos, stage_entry_pos] + dance_waypoints + [stage_entry_pos, backstage_pos]
+        self.waypoints = self.original_waypoints.copy()  # 可能会被分段修改的工作副本
         self.threshold = threshold
         self.current_waypoint_index = 0
         self.reached_final = False
+
+        # 添加主航点索引跟踪 - 记录当前处理的是哪个原始航点
+        self.current_main_waypoint_index = 0
 
         # 分段导航相关
         self.sub_waypoint_index = None  # None 表示未分段
@@ -138,7 +144,7 @@ class NavWaypointPlayer:
             max_time = self.max_time_per_waypoint[self.current_waypoint_index]
             
             if elapsed_time > max_time:
-                rospy.logwarn(f"[超时检测] 航点 {self.current_waypoint_index+1} 导航时间 {elapsed_time:.1f}秒 > {max_time}秒，执行恢复操作")
+                rospy.logwarn(f"[超时检测] 航点 {self.current_waypoint_index+1}/{len(self.waypoints)} (主航点 {self.current_main_waypoint_index+1}) 导航时间 {elapsed_time:.1f}秒 > {max_time}秒，执行恢复操作")
                 self._handle_timeout()
 
     def _build_move_base_goal(self, x, y, theta_deg):
@@ -258,17 +264,18 @@ class NavWaypointPlayer:
         if isinstance(wp, list):
             sub_index = self.sub_waypoint_index if self.sub_waypoint_index is not None else 0
             x, y, theta = wp[sub_index]
-            location_desc = f"[分段航点 {sub_index+1}/{len(wp)} in {self.current_waypoint_index+1}/{len(self.waypoints)}]"
+            location_desc = f"[分段航点 {sub_index+1}/{len(wp)} 属于主航点 {self.current_main_waypoint_index+1}/{len(self.original_waypoints)}]"
         else:
             x, y, theta = wp
+            self.current_main_waypoint_index = self.current_waypoint_index  # 更新主航点索引
             location_desc = ""
             if self.current_waypoint_index == 0:
                 location_desc = "[后台起点]"
             elif self.current_waypoint_index == 1:
                 location_desc = "[舞台入口]"
-            elif self.current_waypoint_index == len(self.waypoints) - 2:
+            elif self.current_waypoint_index == len(self.original_waypoints) - 2:
                 location_desc = "[舞台退出]"
-            elif self.current_waypoint_index == len(self.waypoints) - 1:
+            elif self.current_waypoint_index == len(self.original_waypoints) - 1:
                 location_desc = "[返回后台]"
             else:
                 location_desc = f"[舞蹈点位 {self.current_waypoint_index-1}]"
@@ -288,7 +295,7 @@ class NavWaypointPlayer:
         if self.dance_in_progress or self.reached_final:
             return
             
-        rospy.logwarn(f"[超时处理] 航点 {self.current_waypoint_index+1} 导航超时，强制继续")
+        rospy.logwarn(f"[超时处理] 航点 {self.current_waypoint_index+1} (主航点 {self.current_main_waypoint_index+1}) 导航超时，强制继续")
         
         # 使用缓存的位置信息，避免等待消息
         if not self.position_updated:
@@ -331,7 +338,12 @@ class NavWaypointPlayer:
     def _force_proceed_to_next(self):
         """强制前进到下一个航点，无论当前位置如何"""
         self.sub_waypoint_index = None  # 重置分段
+        current_main_index = self.current_main_waypoint_index
         self.current_waypoint_index += 1  # 前进到下一个航点
+        
+        # 如果当前是一个非分段的主航点，更新主航点索引
+        if self.current_waypoint_index < len(self.waypoints) and not isinstance(self.waypoints[self.current_waypoint_index], list):
+            self.current_main_waypoint_index = self.current_waypoint_index
         
         # 判断是否需要在当前点位执行舞蹈
         if self.current_waypoint_index > 0 and self.current_waypoint_index <= len(self.wait_at_waypoint):
@@ -348,138 +360,70 @@ class NavWaypointPlayer:
                 rospy.loginfo("[完成] 所有航点已完成!")
                 self.reached_final = True
 
-   #  def perform_dance(self):
-   #      """
-   #      调用舞蹈服务，只在第一次调用时真正执行
-   #      """
-   #      if self.dance_service_called:
-   #          rospy.loginfo("舞蹈服务已经被调用过，不再重复调用")
-   #          return True
-            
-   #      if self.play_dance_service is None:
-   #          rospy.logwarn("舞蹈服务不可用，跳过舞蹈")
-   #          return True
-            
-   #      try:
-   #          dance_direction = self.dance_type
-   #          rospy.loginfo(f"开始执行舞蹈: {dance_direction}，本次表演中将只调用一次舞蹈服务")
-   #          self.dance_direction_pub.publish(String(dance_direction))
-   #          rospy.sleep(0.5)
-   #          response = self.play_dance_service()
-            
-   #          # 标记舞蹈服务已调用
-   #          self.dance_service_called = True
-            
-   #          if response.success:
-   #              rospy.loginfo(f"舞蹈执行成功: {response.message}")
-   #              return True
-   #          else:
-   #              rospy.logwarn(f"舞蹈执行失败: {response.message}")
-   #              return False
-   #      except rospy.ServiceException as e:
-   #          rospy.logerr(f"舞蹈服务调用失败: {e}")
-   #          return False
-
-   #  def _execute_dance_and_continue(self, should_wait):
-   #      """
-   #      执行舞蹈动作并继续导航
-   #      修改：根据当前航点决定是否调用舞蹈服务
-   #      """
-   #      try:
-   #          # 如果是第二个航点(舞台入口)，才调用舞蹈服务
-   #          if self.current_waypoint_index == 3 and not self.dance_service_called:
-   #              rospy.loginfo("/* 到达diyige  点位，开始执行舞蹈动作... */")
-   #              self.perform_dance()
-   #              rospy.loginfo("/* 舞蹈开始，将持续整个表演过程 */")
-            
-   #          # 获取等待时间
-   #          wait_time = 0
-   #          if self.current_waypoint_index > 0 and self.current_waypoint_index <= len(self.wait_times):
-   #              wait_time = self.wait_times[self.current_waypoint_index - 1]
-            
-   #          if should_wait and wait_time > 0:
-   #              rospy.loginfo(f"等待 {wait_time} 秒后前往下一个航点...")
-   #              # 使用time.sleep而不是rospy.sleep，以便能够响应Ctrl+C
-   #              start_time = time.time()
-   #              while time.time() - start_time < wait_time and not rospy.is_shutdown():
-   #                  time.sleep(0.1)
-   #          else:
-   #              rospy.loginfo("立即前往下一个航点...")
-            
-   #          if self.current_waypoint_index < len(self.waypoints):
-   #              self._stuck_counter = 0  # 重置卡滞计数
-   #              self.navigate_to_current_waypoint()
-   #          else:
-   #              rospy.loginfo("[完成] 所有航点已完成!")
-   #              self.reached_final = True
-   #      except Exception as e:
-   #          rospy.logerr(f"舞蹈执行线程错误: {e}")
-   #      finally:
-   #          self.dance_in_progress = False
-
-
     def perform_dance(self):
-      """
-      调用舞蹈服务，只在第一次调用时真正执行，无需关注执行结果
-      """
-      if self.dance_service_called:
-         rospy.loginfo("舞蹈服务已经被调用过，不再重复调用")
-         return
-         
-      if self.play_dance_service is None:
-         rospy.logwarn("舞蹈服务不可用，跳过舞蹈")
-         return
-         
-      try:
-         dance_direction = self.dance_type
-         rospy.loginfo(f"开始执行舞蹈: {dance_direction}，本次表演中将只调用一次舞蹈服务")
-         self.dance_direction_pub.publish(String(dance_direction))
-         rospy.sleep(0.5)
-         # 调用服务但不关心结果
-         self.play_dance_service()
-         # 标记舞蹈服务已调用
-         self.dance_service_called = True
-      except rospy.ServiceException as e:
-         rospy.logerr(f"舞蹈服务调用失败: {e}")
-      # 无论服务成功与否，都不影响后续流程
+        """
+        调用舞蹈服务，只在第一次调用时真正执行，无需关注执行结果
+        """
+        if self.dance_service_called:
+            rospy.loginfo("舞蹈服务已经被调用过，不再重复调用")
+            return
+            
+        if self.play_dance_service is None:
+            rospy.logwarn("舞蹈服务不可用，跳过舞蹈")
+            return
+            
+        try:
+            dance_direction = self.dance_type
+            rospy.loginfo(f"开始执行舞蹈: {dance_direction}，本次表演中将只调用一次舞蹈服务")
+            self.dance_direction_pub.publish(String(dance_direction))
+            rospy.sleep(0.5)
+            # 调用服务但不关心结果
+            self.play_dance_service()
+            # 标记舞蹈服务已调用
+            self.dance_service_called = True
+        except rospy.ServiceException as e:
+            rospy.logerr(f"舞蹈服务调用失败: {e}")
+        # 无论服务成功与否，都不影响后续流程
 
     def _execute_dance_and_continue(self, should_wait):
-      """
-      执行舞蹈动作并继续导航
-      简化：只在特定点位调用舞蹈服务，不关心执行结果
-      """
-      try:
-         # 如果是第三个航点(第一个舞蹈点位)，才调用舞蹈服务
-         if self.current_waypoint_index == 3 and not self.dance_service_called:
-               rospy.loginfo("/* 到达第一个舞蹈点位，开始执行舞蹈动作... */")
-               self.perform_dance()
-               rospy.loginfo("/* 舞蹈指令已发送，将继续执行剩余航点 */")
-         
-         # 获取等待时间
-         wait_time = 0
-         if self.current_waypoint_index > 0 and self.current_waypoint_index <= len(self.wait_times):
-               wait_time = self.wait_times[self.current_waypoint_index - 1]
-         
-         if should_wait and wait_time > 0 and self.current_waypoint_index>1:
-               rospy.loginfo(f"等待 {wait_time} 秒后前往下一个航点...")
-               # 使用time.sleep而不是rospy.sleep，以便能够响应Ctrl+C
-               start_time = time.time()
-               while time.time() - start_time < wait_time and not rospy.is_shutdown():
-                  time.sleep(0.1)
-         else:
-               rospy.loginfo("立即前往下一个航点...")
-         
-         if self.current_waypoint_index < len(self.waypoints):
-               self._stuck_counter = 0  # 重置卡滞计数
-               self.navigate_to_current_waypoint()
-         else:
-               rospy.loginfo("[完成] 所有航点已完成!")
-               self.reached_final = True
-      except Exception as e:
-         rospy.logerr(f"舞蹈执行线程错误: {e}")
-      finally:
-         self.dance_in_progress = False
-         
+        """
+        执行舞蹈动作并继续导航
+        使用主航点索引而不是普通航点索引来判断是否调用舞蹈服务
+        """
+        try:
+            # 修改：根据主航点索引而不是当前航点索引判断是否调用舞蹈服务
+            # 第三个主航点(索引2)是第一个舞蹈点位
+            if self.current_main_waypoint_index == 3 and not self.dance_service_called:
+                rospy.loginfo(f"/* 到达第一个舞蹈点位(主航点 {self.current_main_waypoint_index+1})，开始执行舞蹈动作... */")
+                self.perform_dance()
+                rospy.loginfo("/* 舞蹈指令已发送，将继续执行剩余航点 */")
+            
+            # 获取等待时间
+            wait_time = 0
+            if self.current_waypoint_index > 0 and self.current_waypoint_index <= len(self.wait_times):
+                wait_time = self.wait_times[self.current_waypoint_index - 1]
+            
+            # 只有主航点序列中的点才需要等待（跳过第一个和最后一个主航点）
+            if should_wait and wait_time > 0 and self.current_main_waypoint_index > 1:
+                rospy.loginfo(f"等待 {wait_time} 秒后前往下一个航点...")
+                # 使用time.sleep而不是rospy.sleep，以便能够响应Ctrl+C
+                start_time = time.time()
+                while time.time() - start_time < wait_time and not rospy.is_shutdown():
+                    time.sleep(0.1)
+            else:
+                rospy.loginfo("立即前往下一个航点...")
+            
+            if self.current_waypoint_index < len(self.waypoints):
+                self._stuck_counter = 0  # 重置卡滞计数
+                self.navigate_to_current_waypoint()
+            else:
+                rospy.loginfo("[完成] 所有航点已完成!")
+                self.reached_final = True
+        except Exception as e:
+            rospy.logerr(f"舞蹈执行线程错误: {e}")
+        finally:
+            self.dance_in_progress = False
+            
         
     def feedback_callback(self, msg):
         """处理导航反馈，检测卡滞和到达情况"""
@@ -512,11 +456,11 @@ class NavWaypointPlayer:
         dy = current_pose.position.y - y
         dist = math.hypot(dx, dy)
 
-        rospy.loginfo_throttle(2, f"[当前位置] ({current_pose.position.x:.2f}, {current_pose.position.y:.2f}) -> 距离目标 {dist:.2f} m")
+        rospy.loginfo_throttle(2, f"[当前位置] ({current_pose.position.x:.2f}, {current_pose.position.y:.2f}) -> 距离目标 {dist:.2f} m (主航点 {self.current_main_waypoint_index+1})")
 
         # 检查是否超过了最大停留时间
         if self.waypoint_start_time and (rospy.Time.now() - self.waypoint_start_time).to_sec() > self.max_time_per_waypoint[self.current_waypoint_index]:
-            rospy.logwarn(f"[超时] 航点 {self.current_waypoint_index+1} 导航超时，强制继续")
+            rospy.logwarn(f"[超时] 航点 {self.current_waypoint_index+1} (主航点 {self.current_main_waypoint_index+1}) 导航超时，强制继续")
             self._handle_timeout()
             return
 
@@ -604,9 +548,15 @@ class NavWaypointPlayer:
                     # 完成所有分段，前进到下一个主航点
                     self.sub_waypoint_index = None
                     self.current_waypoint_index += 1
+                    # 如果不是分段点，更新主航点索引
+                    if self.current_waypoint_index < len(self.waypoints) and not isinstance(self.waypoints[self.current_waypoint_index], list):
+                        self.current_main_waypoint_index = self.current_waypoint_index
             else:
                 # 直接前进到下一个航点
                 self.current_waypoint_index += 1
+                # 更新主航点索引
+                if self.current_waypoint_index < len(self.waypoints) and not isinstance(self.waypoints[self.current_waypoint_index], list):
+                    self.current_main_waypoint_index = self.current_waypoint_index
 
             # 判断是否需要在当前点位等待
             idx = self.current_waypoint_index - 1 if not sub_waypoints else self.current_waypoint_index
