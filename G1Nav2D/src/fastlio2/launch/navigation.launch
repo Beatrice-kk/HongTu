@@ -10,7 +10,7 @@
     <node pkg="fastlio" type="localizer_node" name="localizer_node" output="screen"/>
 
 
-    <arg name="pcd_path" default="platform_1.pcd" />
+    <arg name="pcd_path" default="platform_1_2.pcd" />
     <arg name="pcd_dir" default="/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD" />
 
     <node pkg="fastlio" type="slam_reloc.py" name="slam_reloc" output="screen">
@@ -18,7 +18,7 @@
     </node>
 
 
-    <arg name="map_file" default="platform_1.yaml" />
+    <arg name="map_file" default="platform_1_2.yaml" />
 
     <include file="$(find fastlio)/launch/gridmap_load.launch">
             <arg name="rviz" value="false"/>
@@ -27,7 +27,7 @@
 
     </include>
 
-    <arg name="ground_map_path" default="ground_platform_1.pcd" />
+    <arg name="ground_map_path" default="ground_platform_1_2.pcd" />
     <arg name="ground_map_dir" default="/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD" />
 
     <include file="$(find tool)/launch/downsample_pointcloud.launch">

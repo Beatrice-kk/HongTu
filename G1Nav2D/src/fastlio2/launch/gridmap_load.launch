@@ -5,7 +5,7 @@
     <arg name="rviz" default="true" />
 
     <!-- 设置地图的配置文件 -->
-    <arg name="2dmap_file" default="platform_1.yaml" />
+    <arg name="2dmap_file" default="platform_1_2.yaml" />
     <arg name="map_path" default="/home/unitree/HongTu/G1Nav2D/map_folder" />
 
     <!-- <arg name="2dmap_file" default="$(find pcd_file)/grid_map/pcd2pgm/bbb.yaml" /> -->

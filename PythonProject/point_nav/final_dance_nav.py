@@ -349,14 +349,14 @@ if __name__ == "__main__":
                       choices=['A', 'B', 'Up', 'Down', 'Left', 'Right', 'X', 'Y'],
                       help='指定要执行的舞蹈类型')
     args, unknown = parser.parse_known_args()
-    backstage_pos =(0,0,0)
-    stage_entry_pos = (-1.86,0.890,180)
+    backstage_pos =(0.0,0,0)
+    stage_entry_pos = (-1.74,0.540,110)
 
     dance_choreography = {
         'A': [
-            ((-3.35, 3.0, 151), 3.0),
-            ((-3, 3.0, 138), 5.0),
-            ((-2.7, 3.0, 114), 2.0),
+            ((-3.35, 3.0, 151), 30.0),
+            ((-2.8, 4.1, 100), 50.0),
+            ((-2.7, 3.0, 114), 20.0),
         ],
         'B': [
             ((4.18, 1.15, -159), 2.0),
