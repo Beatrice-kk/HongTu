@@ -16,7 +16,7 @@ from geometry_msgs.msg import Twist
 from std_srvs.srv import SetBool
 
 class SimpleNavWaypointPlayer:
-    def __init__(self, backstage_pos, stage_entry_pos, dance_type, dance_choreography, threshold=0.8):
+    def __init__(self, backstage_pos, door_pos, dance_type, dance_choreography, threshold,threshold_yaw):
         """
         Initialize the navigator with waypoint information.
         """
@@ -32,10 +32,11 @@ class SimpleNavWaypointPlayer:
         self.wait_times = [wait for _, wait in self.dance_sequence]
         
         # Build complete waypoint sequence
-        self.waypoints = dance_waypoints + [backstage_pos]
+        self.waypoints = dance_waypoints  +[backstage_pos]
         rospy.loginfo(f"总路径点数量: {len(self.waypoints)}，舞蹈点: {len(dance_waypoints)}，最后还会回到: {backstage_pos}")
       
         self.threshold = threshold
+        self.threshold_yaw=threshold_yaw
         self.current_waypoint_index = 0
         self.reached_final = False
         
@@ -64,7 +65,7 @@ class SimpleNavWaypointPlayer:
         self.goal_pub = rospy.Publisher("/move_base/goal", MoveBaseActionGoal, queue_size=1)
         self.feedback_sub = rospy.Subscriber("/move_base/feedback", MoveBaseActionFeedback, self.feedback_callback)
         self.cancel_pub = rospy.Publisher("/move_base/cancel", GoalID, queue_size=1)
-        self.odom_sub = rospy.Subscriber("/odom", Odometry, self.odom_callback)
+      #   self.odom_sub = rospy.Subscriber("/slam_odom", Odometry, self.odom_callback)
         self.dance_direction_pub = rospy.Publisher('dance_direction', String, queue_size=1)
         self.status_sub = rospy.Subscriber("/move_base/status", GoalStatusArray, self.status_callback)
         
@@ -138,7 +139,7 @@ class SimpleNavWaypointPlayer:
                dx = self.current_position["x"] - pt[0]
                dy = self.current_position["y"] - pt[1]
                dist = math.hypot(dx, dy)
-               if dist < threshold:
+               if (dist < threshold):
                   rospy.loginfo(f"到达分段点: ({pt[0]:.2f}, {pt[1]:.2f})")
                   break
                if time.time() - start_time > 15.0:  # 每个点最多等待15s
@@ -289,16 +290,16 @@ class SimpleNavWaypointPlayer:
         goal.goal.target_pose.pose.orientation.w = q[3]
         return goal
 
-    def odom_callback(self, msg):
-        """Get current position from odometry as backup"""
-        self.current_position["x"] = msg.pose.pose.position.x
-        self.current_position["y"] = msg.pose.pose.position.y
+   #  def odom_callback(self, msg):
+   #      """Get current position from odometry as backup"""
+   #      self.current_position["x"] = msg.pose.pose.position.x
+   #      self.current_position["y"] = msg.pose.pose.position.y
         
-        # Extract angle
-        orientation = msg.pose.pose.orientation
-        quaternion = (orientation.x, orientation.y, orientation.z, orientation.w)
-        euler = tft.euler_from_quaternion(quaternion)
-        self.current_position["theta"] = math.degrees(euler[2])
+   #      # Extract angle
+   #      orientation = msg.pose.pose.orientation
+   #      quaternion = (orientation.x, orientation.y, orientation.z, orientation.w)
+   #      euler = tft.euler_from_quaternion(quaternion)
+   #      self.current_position["theta"] = math.degrees(euler[2])
 
     def navigate_to_current_waypoint(self, is_retry=False):
         """Navigate to the current waypoint"""
@@ -474,6 +475,7 @@ class SimpleNavWaypointPlayer:
             return
 
         # Update current position
+        
         current_pose = msg.feedback.base_position.pose
         self.current_position["x"] = current_pose.position.x
         self.current_position["y"] = current_pose.position.y
@@ -483,18 +485,27 @@ class SimpleNavWaypointPlayer:
         euler = tft.euler_from_quaternion(quaternion)
         self.current_position["theta"] = math.degrees(euler[2])
 
-        # Get current waypoint
-        x, y, _ = self.waypoints[self.current_waypoint_index]
+      # Get current waypoint
+        x, y, target_yaw = self.waypoints[self.current_waypoint_index]
 
-        # Calculate distance to target
+      # Calculate distance to target
         dx = current_pose.position.x - x
         dy = current_pose.position.y - y
         dist = math.hypot(dx, dy)
 
-        rospy.loginfo_throttle(2, f"[当前位置] ({current_pose.position.x:.2f}, {current_pose.position.y:.2f}) -> 距离目标: {dist:.2f} 米")
+      # Calculate angular difference
+        current_yaw = self.current_position["theta"]  # Assuming this is in degrees
+        d_yaw = abs(current_yaw - target_yaw)
+       # Normalize to the range [0, 180]
+        if d_yaw > 180:
+           d_yaw = 360 - d_yaw
 
-        # Check if we've reached the waypoint
-        if dist <= self.threshold and not self.dance_in_progress:
+      # Log information
+        rospy.loginfo_throttle(2, f"[当前位置] ({current_pose.position.x:.2f}, {current_pose.position.y:.2f}) -> 距离目标: {dist:.2f} 米, 角度差: {d_yaw:.2f} 度")
+
+      # Check if we've reached the waypoint
+        if dist <= self.threshold and d_yaw <= self.threshold_yaw and not self.dance_in_progress:
+      #   if dist <= self.threshold and not self.dance_in_progress and :
             rospy.loginfo(f"到达路径点 {self.current_waypoint_index+1}")
             self.navigation_active = False
             self.dance_in_progress = True
@@ -527,14 +538,15 @@ if __name__ == "__main__":
                       help='Specify dance type to execute')
     args, unknown = parser.parse_known_args()
     
-    backstage_pos = (-1.65, 0, 0)
+    backstage_pos = (-0.6, 0, 0)
     stage_entry_pos = (-1.94, 0.80, 115)  #弃用
+    door_pos = (-1.6, 0, 0)
 
     dance_choreography = {
         'A': [
-            ((-2.5, 4, 180), 20.0),
-            ((-3.0, 3.2, 180), 30.0),
-            ((-3.5, 2.5, 180), 20.0),
+            ((-3.2, 3.8, -160), 20.0),
+            ((-3.4, 3.2, 180), 30.0),
+            ((-3.6, 2.5, 150), 20.0),
         ],
         'B': [
             ((4.18, 1.15, -159), 2.0),
@@ -578,13 +590,15 @@ if __name__ == "__main__":
         ]
     }
     
-    threshold = 0.8  # Arrival threshold
+    threshold_dist = 0.5  # Arrival threshold
+    threshold_yaw = 20
     node = SimpleNavWaypointPlayer(
         backstage_pos=backstage_pos,
-        stage_entry_pos=stage_entry_pos,
+        door_pos=door_pos,
         dance_type=args.dance,
         dance_choreography=dance_choreography,
-        threshold=threshold
+        threshold=threshold_dist,
+        threshold_yaw=threshold_yaw
     )
     
     rospy.loginfo(f"表演开始，使用舞蹈类型: {args.dance}")

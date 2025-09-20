@@ -111,7 +111,7 @@ class CmdVelController:
         original_wz = wz
         if self.flag_rotate == 0 and abs(wz) > 0.01:
             # 当禁止旋转且有旋转指令时
-            if abs(wz) > 0.5:  # 如果是大幅度旋转（约30度/秒）
+            if abs(wz) > 1:  # 如果是大幅度旋转（约60度/秒）
                 rospy.logwarn_throttle(1.0, f"Rotation command {wz:.2f} rad/s ignored due to flag_rotate=0")
                 wz = 0.0
                 
@@ -129,7 +129,7 @@ class CmdVelController:
                         vy = max(vy, 0.2)  # 向左侧移动
             else:
                 # 小幅度旋转可以保留，但减小幅度
-                wz *= 0.3
+                wz *= 0.8
                 rospy.loginfo_throttle(2.0, f"Reduced rotation from {original_wz:.2f} to {wz:.2f} rad/s")
         
         self.wz_buffer.append(wz)
