@@ -313,7 +313,7 @@ class NavWaypointPlayer:
             target_x, target_y, _ = wp[sub_index]
             
             # 尝试紧急移动
-            self._emergency_move_toward(target_x, target_y, current_x, current_y, duration=2.0)
+            # self._emergency_move_toward(target_x, target_y, current_x, current_y, duration=2.0)
             
             # 更新分段索引或整体航点索引
             sub_index += 1
