@@ -107,7 +107,7 @@ class NavWaypointPlayer:
             self.play_dance_service = None
         
         # 添加每个航点的最大停留时间
-        self.max_time_per_waypoint = [30.0] * len(self.waypoints)
+        self.max_time_per_waypoint = [70.0] * len(self.waypoints)
         self.waypoint_start_time = None
         
         # 启动进度检查定时器
@@ -212,7 +212,7 @@ class NavWaypointPlayer:
         dy = target_y - current_y
         dist = math.hypot(dx, dy)
         
-        if dist < 0.1:  # 已经非常接近
+        if dist < 0.4:  # 已经非常接近
             return
             
         # 归一化方向向量
@@ -224,8 +224,8 @@ class NavWaypointPlayer:
         
         # 创建速度命令 - 使用较低的速度以确保安全
         cmd = Twist()
-        cmd.linear.x = 0.2 * dx  # 降低线速度
-        cmd.linear.y = 0.2 * dy
+        cmd.linear.x = 0.1 * dx  # 降低线速度
+        cmd.linear.y = 0.1 * dy
         cmd.angular.z = 0.0
         
         rospy.logwarn(f"执行紧急移动 {duration} 秒，方向: ({dx:.2f}, {dy:.2f})")
@@ -387,8 +387,8 @@ class NavWaypointPlayer:
         """
         try:
             # 如果是第二个航点(舞台入口)，才调用舞蹈服务
-            if self.current_waypoint_index == 2 and not self.dance_service_called:
-                rospy.loginfo("/* 到达舞台入口，开始执行舞蹈动作... */")
+            if self.current_waypoint_index == 3 and not self.dance_service_called:
+                rospy.loginfo("/* 到达diyige  点位，开始执行舞蹈动作... */")
                 self.perform_dance()
                 rospy.loginfo("/* 舞蹈开始，将持续整个表演过程 */")
             
@@ -568,13 +568,13 @@ if __name__ == "__main__":
                       help='指定要执行的舞蹈类型')
     args, unknown = parser.parse_known_args()
     backstage_pos =(0.0,0,0)
-    stage_entry_pos = (-1.74,0.540,110)
+    stage_entry_pos = (-1.94,0.80,115)
 
     dance_choreography = {
         'A': [
-            ((-3.35, 3.0, 151), 30.0),
+            ((-2.85, 3.0, 151), 60.0),
             ((-2.8, 4.1, 100), 50.0),
-            ((-2.7, 3.0, 114), 20.0),
+            ((-3.7, 2.7, 160), 70.0),
         ],
         'B': [
             ((4.18, 1.15, -159), 2.0),
