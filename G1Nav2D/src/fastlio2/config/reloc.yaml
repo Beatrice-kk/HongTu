@@ -1,0 +1,24 @@
+# 自动重定位脚本的配置文件
+
+# 1. 地图设置
+# Pre-processed PCD map file path (absolute path)
+map_pcd_path: "/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD/platform_1_2.pcd" # <-- 修改这里：请填写您的地图文件的绝对路径
+
+# 2. 初始位置估计
+# The approximate starting position of the robot.
+# We assume this is a fixed starting point, e.g., a charging station.
+initial_pose:
+  x: 0.0
+  y: 0.0
+
+# 3. 自动朝向搜索参数
+# The script will search for the correct yaw angle automatically.
+yaw_search:
+  # The range of angles to search, in degrees.
+  # For example, a range of 180 means searching from -180 to +180 degrees.
+  range_deg: 180
+  
+  # The step size for the search, in degrees.
+  # A smaller step increases accuracy but takes more time.
+  # 15-30 degrees is a reasonable starting point.
+  step_deg: 20

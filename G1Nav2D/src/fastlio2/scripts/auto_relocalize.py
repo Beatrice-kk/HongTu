@@ -1,164 +1,127 @@
-#!/usr/bin/env python3
-import rospy
-import tf
-from geometry_msgs.msg import PoseWithCovarianceStamped
-from std_srvs.srv import Empty
-import random
-import time
-import subprocess
-import re
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-class AutoRelocalize:
-    def __init__(self):
-        rospy.init_node('auto_relocalize', anonymous=True)
-        
-        # 发布2D姿态估计的话题
-        self.pose_pub = rospy.Publisher('/initialpose', PoseWithCovarianceStamped, queue_size=1)
-        
-        # 清除代价地图服务（如果需要的话）
-        rospy.wait_for_service('/move_base/clear_costmaps')
-        self.clear_costmaps = rospy.ServiceProxy('/move_base/clear_costmaps', Empty)
-        
-        # 设置地图边界 - 根据您的地图调整这些值
-        self.x_min, self.x_max = -5.0, 5.0
-        self.y_min, self.y_max = -5.0, 5.0
-        
-        # 配置参数
-        self.attempts_per_pose = 3  # 每个位置尝试的次数
-        self.max_total_attempts = 100  # 最大尝试次数
-        self.wait_time = 1.0  # 每次尝试之间的等待时间
-        
-        # 默认成功的ICP分数阈值（可以根据您的系统调整）
-        self.success_threshold = 0.03  # ICP分数低于此值表示成功
-        
-        # 从launch文件或参数服务器获取配置
-        self.grid_search = rospy.get_param('~grid_search', False)  # 是否使用网格搜索策略
-        self.grid_size = rospy.get_param('~grid_size', 5)  # 网格大小
-        
-        # 记录重定位的历史
-        self.attempts = 0
-        self.successful = False
-        
-    def create_pose_msg(self, x, y, yaw):
-        """创建一个2D姿态估计消息"""
-        pose_msg = PoseWithCovarianceStamped()
-        pose_msg.header.frame_id = "map"
-        pose_msg.header.stamp = rospy.Time.now()
-        
-        pose_msg.pose.pose.position.x = x
-        pose_msg.pose.pose.position.y = y
-        pose_msg.pose.pose.position.z = 0.0
-        
-        # 四元数表示方向
-        quaternion = tf.transformations.quaternion_from_euler(0, 0, yaw)
-        pose_msg.pose.pose.orientation.x = quaternion[0]
-        pose_msg.pose.pose.orientation.y = quaternion[1]
-        pose_msg.pose.pose.orientation.z = quaternion[2]
-        pose_msg.pose.pose.orientation.w = quaternion[3]
-        
-        # 设置协方差（这个值可能需要调整）
-        pose_msg.pose.covariance = [0.25, 0.0, 0.0, 0.0, 0.0, 0.0,
-                                   0.0, 0.25, 0.0, 0.0, 0.0, 0.0,
-                                   0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                                   0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                                   0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                                   0.0, 0.0, 0.0, 0.0, 0.0, 0.06853891945200942]
-        
-        return pose_msg
+import rospy
+import math
+import yaml
+from fastlio.srv import SlamReLoc, SlamReLocRequest
+from fastlio.srv import SlamRelocCheck, SlamRelocCheckRequest
+from std_srvs.srv import Empty
+
+# --- 服务调用封装 ---
+
+def call_service(service_name, service_type, request=None):
+    """一个通用的服务调用函数"""
+    rospy.logdebug("Waiting for service: %s", service_name)
+    try:
+        rospy.wait_for_service(service_name, timeout=5.0)
+    except rospy.ROSException:
+        rospy.logerr("Service '%s' not available. Is the localizer_node running?", service_name)
+        return None
     
-    def check_icp_success(self):
-        """检查最近的日志以确定ICP是否成功"""
-        try:
-            # 运行grep命令获取最近的ICP日志
-            cmd = "tail -n 50 ~/.ros/log/latest/stdout.log | grep -A 5 'ICP'"
-            result = subprocess.check_output(cmd, shell=True, text=True)
-            
-            # 检查成功消息
-            if "Alignment SUCCESS" in result:
-                # 提取分数以进行更精确的判断
-                match = re.search(r"Refine score: ([0-9.]+)", result)
-                if match:
-                    score = float(match.group(1))
-                    if score < self.success_threshold:
-                        rospy.loginfo(f"ICP成功! 分数: {score}")
-                        return True
-            
-            return False
-        except Exception as e:
-            rospy.logwarn(f"检查ICP状态时发生错误: {e}")
-            return False
-    
-    def grid_search_poses(self):
-        """生成网格搜索的姿态列表"""
-        poses = []
-        x_step = (self.x_max - self.x_min) / (self.grid_size - 1)
-        y_step = (self.y_max - self.y_min) / (self.grid_size - 1)
-        
-        for i in range(self.grid_size):
-            x = self.x_min + i * x_step
-            for j in range(self.grid_size):
-                y = self.y_min + j * y_step
-                # 每个位置尝试4个不同的方向
-                for yaw in [0, 1.57, 3.14, -1.57]:  # 0, 90, 180, -90度
-                    poses.append((x, y, yaw))
-        
-        return poses
-    
-    def run(self):
-        """执行自动重定位过程"""
-        rospy.loginfo("开始自动重定位过程...")
-        
-        if self.grid_search:
-            poses = self.grid_search_poses()
-            rospy.loginfo(f"使用网格搜索策略，生成了{len(poses)}个位姿")
-        
-        total_attempts = 0
-        
-        while not rospy.is_shutdown() and total_attempts < self.max_total_attempts and not self.successful:
-            if self.grid_search and total_attempts < len(poses):
-                # 使用预先生成的网格搜索姿态
-                x, y, yaw = poses[total_attempts]
-            else:
-                # 随机生成姿态
-                x = random.uniform(self.x_min, self.x_max)
-                y = random.uniform(self.y_min, self.y_max)
-                yaw = random.uniform(-3.14, 3.14)
-            
-            rospy.loginfo(f"尝试姿态估计 #{total_attempts+1}: x={x:.2f}, y={y:.2f}, yaw={yaw:.2f}")
-            
-            # 发布姿态估计
-            pose_msg = self.create_pose_msg(x, y, yaw)
-            self.pose_pub.publish(pose_msg)
-            
-            # 等待一会儿让ICP处理
-            time.sleep(self.wait_time)
-            
-            # 清除代价地图
-            try:
-                self.clear_costmaps()
-                rospy.loginfo("成功清除代价地图!")
-            except rospy.ServiceException as e:
-                rospy.logwarn(f"清除代价地图失败: {e}")
-            
-            # 再等一会儿看结果
-            time.sleep(self.wait_time)
-            
-            # 检查是否重定位成功
-            if self.check_icp_success():
-                self.successful = True
-                rospy.loginfo(f"重定位成功! 位置: x={x:.2f}, y={y:.2f}, yaw={yaw:.2f}")
-                break
-            
-            total_attempts += 1
-            
-        if self.successful:
-            rospy.loginfo(f"自动重定位成功，共尝试 {total_attempts} 次")
+    try:
+        service_proxy = rospy.ServiceProxy(service_name, service_type)
+        if request is None and service_type == Empty:
+             response = service_proxy()
         else:
-            rospy.logwarn(f"达到最大尝试次数 ({self.max_total_attempts})，重定位失败")
+             response = service_proxy(request)
+        return response
+    except rospy.ServiceException as e:
+        rospy.logerr("Service call to '%s' failed: %s", service_name, e)
+        return None
+
+def attempt_relocalization(map_path, x, y, yaw_rad):
+    """尝试使用给定的位姿进行一次重定位"""
+    rospy.loginfo("--> Attempting relocalization at yaw: %.1f deg", math.degrees(yaw_rad))
+    
+    req = SlamReLocRequest()
+    req.pcd_path = map_path
+    req.x = x
+    req.y = y
+    req.z = 0.0  # 假设为2D
+    req.roll = 0.0
+    req.pitch = 0.0
+    req.yaw = yaw_rad
+
+    # 调用重定位服务
+    response = call_service('/slam_reloc', SlamReLoc, req)
+    return response is not None and response.status == 1
+
+def check_reloc_status():
+    """检查重定位是否成功"""
+    response = call_service('/slam_reloc_check', SlamRelocCheck, SlamRelocCheckRequest())
+    if response:
+        return response.status
+    return None # 如果服务调用失败，返回None
+
+# --- 主逻辑 ---
+
+def main():
+    rospy.init_node('one_key_reloc_node', anonymous=True)
+
+    # 1. 从参数服务器加载配置
+    # 使用 rosparam load 命令将 YAML 文件加载到参数服务器
+    # rosparam load path/to/reloc_config.yaml
+    try:
+        config = rospy.get_param('~') # 从私有命名空间获取参数
+        map_path = config['map_pcd_path']
+        initial_pose = config['initial_pose']
+        yaw_search = config['yaw_search']
+    except KeyError as e:
+        rospy.logerr("Configuration parameter %s not found on the parameter server. Did you load the YAML file?", e)
+        rospy.logerr("Use: rosparam load your_config.yaml")
+        return
+
+    rospy.loginfo("Configuration loaded. Starting auto-relocalization...")
+    rospy.loginfo("Map: %s", map_path)
+    rospy.loginfo("Initial position (x,y): (%.2f, %.2f)", initial_pose['x'], initial_pose['y'])
+    
+    # 2. 生成要搜索的Yaw角度列表
+    search_range_deg = yaw_search['range_deg']
+    step_deg = yaw_search['step_deg']
+    
+    yaw_angles_to_try = []
+    # 从0度开始，双向扩展搜索范围
+    yaw_angles_to_try.append(0)
+    current_angle_deg = step_deg
+    while current_angle_deg <= search_range_deg:
+        yaw_angles_to_try.append(current_angle_deg)
+        yaw_angles_to_try.append(-current_angle_deg)
+        current_angle_deg += step_deg
+
+    # 3. 循环尝试重定位
+    reloc_success = False
+    for yaw_deg in yaw_angles_to_try:
+        if rospy.is_shutdown():
+            rospy.logwarn("Shutdown requested, stopping relocation attempts.")
+            break
+
+        # 发送重定位请求
+        if not attempt_relocalization(map_path, initial_pose['x'], initial_pose['y'], math.radians(yaw_deg)):
+            rospy.logwarn("Failed to send relocalization command for yaw %.1f. Skipping.", yaw_deg)
+            continue
+        
+        # 等待一段时间让定位节点处理
+        rospy.sleep(1.0) 
+
+        # 检查结果
+        status = check_reloc_status()
+        if status is True:
+            rospy.loginfo("======================================================")
+            rospy.loginfo("SUCCESS! Relocalization successful at yaw: %.2f degrees", yaw_deg)
+            rospy.loginfo("======================================================")
+            reloc_success = True
+            break
+        else:
+            rospy.logwarn("Relocalization failed at yaw %.1f. Trying next angle.", yaw_deg)
+
+    if not reloc_success and not rospy.is_shutdown():
+        rospy.logerr("======================================================")
+        rospy.logerr("FAILURE: Auto-relocalization failed after trying all angles.")
+        rospy.logerr("======================================================")
 
 if __name__ == '__main__':
     try:
-        relocalize = AutoRelocalize()
-        relocalize.run()
+        main()
     except rospy.ROSInterruptException:
-        pass
+        rospy.loginfo("Auto-reloc script interrupted.")

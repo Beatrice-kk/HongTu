@@ -1,0 +1,7 @@
+<launch>
+    <node pkg="fastlio" type="auto_relocalize.py" name="one_key_reloc_node" output="screen" launch-prefix="bash -c 'sleep 5; $0 $@' ">
+    
+     <rosparam command="load" file="$(find fastlio)/config/reloc.yaml" />
+    </node>
+
+</launch>
