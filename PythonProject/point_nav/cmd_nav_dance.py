@@ -10,13 +10,13 @@ import argparse
 from move_base_msgs.msg import MoveBaseActionGoal, MoveBaseActionFeedback
 from actionlib_msgs.msg import GoalID, GoalStatusArray
 from std_msgs.msg import String
-from std_srvs.srv import Trigger
+from std_srvs.srv import Trigger, Empty
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
 from std_srvs.srv import SetBool
 
 class SimpleNavWaypointPlayer:
-    def __init__(self, backstage_pos, door_pos, dance_type, dance_choreography, threshold,threshold_yaw):
+    def __init__(self, backstage_pos, door_pos, dance_type, dance_choreography, threshold, threshold_yaw):
         """
         Initialize the navigator with waypoint information.
         """
@@ -38,7 +38,7 @@ class SimpleNavWaypointPlayer:
         rospy.loginfo(f"总路径点数量: {len(self.waypoints)}，舞蹈点: {len(dance_waypoints)}，最后还会回到: {backstage_pos}")
       
         self.threshold = threshold
-        self.threshold_yaw=threshold_yaw
+        self.threshold_yaw = threshold_yaw
         self.current_waypoint_index = 0
         self.reached_final = False
         
@@ -50,6 +50,7 @@ class SimpleNavWaypointPlayer:
         self.dance_type = dance_type
         self.dance_in_progress = False
         self.navigation_active = False
+        self.using_direct_control = False  # Flag to indicate if we're using direct control
         
         # Navigation status monitoring
         self.move_base_status = None
@@ -63,16 +64,29 @@ class SimpleNavWaypointPlayer:
         self.stop_enforcer_timer = None
         self.completely_stopped = False
         
+        # 添加清除局部代价图的定时器
+        self.clear_costmap_timer = None
+        
         # Publishers and subscribers
         self.goal_pub = rospy.Publisher("/move_base/goal", MoveBaseActionGoal, queue_size=1)
         self.feedback_sub = rospy.Subscriber("/move_base/feedback", MoveBaseActionFeedback, self.feedback_callback)
         self.cancel_pub = rospy.Publisher("/move_base/cancel", GoalID, queue_size=1)
-      #   self.odom_sub = rospy.Subscriber("/slam_odom", Odometry, self.odom_callback)
+        self.odom_sub = rospy.Subscriber("/slam_odom", Odometry, self.odom_callback)
         self.dance_direction_pub = rospy.Publisher('dance_direction', String, queue_size=1)
         self.status_sub = rospy.Subscriber("/move_base/status", GoalStatusArray, self.status_callback)
         
         # Add cmd_vel publisher to stop the robot
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
+        
+        # Setup clear costmap service client
+        rospy.loginfo("Waiting for clear costmaps service...")
+        try:
+            rospy.wait_for_service('/move_base/clear_costmaps', timeout=5.0)
+            self.clear_costmaps_service = rospy.ServiceProxy('/move_base/clear_costmaps', Empty)
+            rospy.loginfo("Clear costmaps service connected")
+        except rospy.ROSException:
+            rospy.logwarn("Clear costmaps service not available, costmap clearing disabled")
+            self.clear_costmaps_service = None
         
         # Dance service client
         rospy.loginfo("Waiting for dance service...")
@@ -91,6 +105,9 @@ class SimpleNavWaypointPlayer:
         # Add a timer for dance completion
         self.dance_timer = None
         
+        # Add flag to control direct control termination
+        self.direct_control_active = False
+        
         rospy.sleep(1.0)
         rospy.loginfo(f"Starting performance, dance type: {self.dance_type}")
         self.start_navigation_watchdog()
@@ -105,13 +122,158 @@ class SimpleNavWaypointPlayer:
         if self.nav_watchdog_timer:
             self.nav_watchdog_timer.shutdown()
         self.nav_watchdog_timer = rospy.Timer(rospy.Duration(5.0), self.check_navigation_progress)
-      
+    
+    def start_costmap_clearing_timer(self):
+        """Start a timer to periodically clear the costmap"""
+        if self.clear_costmap_timer:
+            self.clear_costmap_timer.shutdown()
+            
+        # Clear the costmap every 2 seconds when in direct control mode
+        self.clear_costmap_timer = rospy.Timer(rospy.Duration(2.0), self.clear_costmaps_callback)
+        rospy.loginfo("启动局部代价图清除定时器 - 防止周围的人影响导航")
+    
+    def stop_costmap_clearing_timer(self):
+        """Stop the costmap clearing timer"""
+        if self.clear_costmap_timer:
+            self.clear_costmap_timer.shutdown()
+            self.clear_costmap_timer = None
+            rospy.loginfo("停止局部代价图清除定时器")
+    
+    def clear_costmaps_callback(self, event=None):
+        """Callback to clear the costmaps"""
+        if self.clear_costmaps_service:
+            try:
+                self.clear_costmaps_service()
+                rospy.loginfo_throttle(5.0, "已清除局部代价图")
+            except rospy.ServiceException as e:
+                rospy.logwarn_throttle(10.0, f"清除代价图服务调用失败: {e}")
+    
+    def move_to_point_directly(self, target_x, target_y, target_theta, speed=0.2, angular_speed=0.5):
+        """
+        Move directly to a target point using cmd_vel without navigation stack
+        """
+        rospy.loginfo(f"[直接控制] 移动到点 ({target_x:.2f}, {target_y:.2f}, {target_theta:.2f})")
+        
+        # Start costmap clearing timer to prevent obstacles from affecting navigation
+        self.start_costmap_clearing_timer()
+        
+        # Get current position
+        current_x = self.current_position["x"]
+        current_y = self.current_position["y"]
+        current_theta = self.current_position["theta"]
+        
+        rate = rospy.Rate(10)  # 10Hz control loop
+        self.direct_control_active = True
+        
+        # Clear costmaps before starting movement
+        self.clear_costmaps_callback()
+        
+        # Continue until we reach the target or are interrupted
+        while not rospy.is_shutdown() and self.direct_control_active:
+            # Calculate distance and angle to target
+            dx = target_x - current_x
+            dy = target_y - current_y
+            distance = math.hypot(dx, dy)
+            
+            # Check if we've reached the target position
+            if distance < self.threshold:
+                # Once position reached, focus on orienting correctly
+                angle_diff = math.degrees(math.atan2(math.sin(math.radians(target_theta - current_theta)), 
+                                            math.cos(math.radians(target_theta - current_theta))))
+                
+                if abs(angle_diff) < self.threshold_yaw:
+                    # Target reached, stop the robot
+                    self.stop_robot()
+                    rospy.loginfo(f"[直接控制] 到达目标点 ({target_x:.2f}, {target_y:.2f}, {target_theta:.2f})")
+                    self.direct_control_active = False
+                    self.stop_costmap_clearing_timer()  # Stop costmap clearing timer
+                    return True
+                
+                # Rotate to target orientation
+                twist = Twist()
+                if angle_diff > 0:
+                    twist.angular.z = min(angular_speed, abs(angle_diff) * 0.05)
+                else:
+                    twist.angular.z = -min(angular_speed, abs(angle_diff) * 0.05)
+                
+                self.cmd_vel_pub.publish(twist)
+            else:
+                # Calculate angle to target
+                target_angle = math.degrees(math.atan2(dy, dx))
+                angle_diff = math.degrees(math.atan2(math.sin(math.radians(target_angle - current_theta)), 
+                                            math.cos(math.radians(target_angle - current_theta))))
+                
+                # Clear costmaps periodically during movement
+                if int(rospy.Time.now().to_sec()) % 3 == 0:  # Every 3 seconds
+                    self.clear_costmaps_callback()
+                
+                # Create twist message
+                twist = Twist()
+                
+                # If we're facing approximately the right direction, move forward
+                if abs(angle_diff) < 20:
+                    # Move forward
+                    twist.linear.x = min(speed, distance * 0.5)
+                    
+                    # Minor rotation correction while moving
+                    if angle_diff > 5:
+                        twist.angular.z = min(angular_speed * 0.5, abs(angle_diff) * 0.03)
+                    elif angle_diff < -5:
+                        twist.angular.z = -min(angular_speed * 0.5, abs(angle_diff) * 0.03)
+                else:
+                    # We need to rotate more substantially
+                    if angle_diff > 0:
+                        twist.angular.z = min(angular_speed, abs(angle_diff) * 0.05)
+                    else:
+                        twist.angular.z = -min(angular_speed, abs(angle_diff) * 0.05)
+                
+                # Send velocity command
+                self.cmd_vel_pub.publish(twist)
+            
+            # Update current position (should be updated by odometry callback)
+            current_x = self.current_position["x"]
+            current_y = self.current_position["y"]
+            current_theta = self.current_position["theta"]
+            
+            # Log progress
+            if distance >= 0.1:
+                rospy.loginfo_throttle(1.0, f"[直接控制] 距离: {distance:.2f}m, 角度差: {angle_diff:.2f}°")
+            
+            rate.sleep()
+        
+        self.stop_costmap_clearing_timer()  # Stop costmap clearing timer
+        return False  # If we get here, we were interrupted
+
+    def direct_control_waypoint(self, x, y, theta):
+        """Handle direct control to a waypoint and signal when arrived"""
+        # Clear costmaps before starting direct control
+        self.clear_costmaps_callback()
+        
+        result = self.move_to_point_directly(x, y, theta)
+        
+        if result:
+            # Successfully reached waypoint
+            self.navigation_active = False
+            self.dance_in_progress = True
+            
+            # Execute dance and wait
+            self.execute_dance_and_wait()
+        else:
+            # Failed or interrupted
+            rospy.logwarn("直接控制导航中断或失败")
+            # Skip to next waypoint if needed
+            self.current_waypoint_index += 1
+            if self.current_waypoint_index < len(self.waypoints):
+                self.navigate_to_current_waypoint()
       
     def segment_nav_to_backstage(self, target, step_size=0.5, threshold=0.5, max_steps=20):
       """分段导航到后台点：自动生成中间点，逐步导航"""
       current_x = self.current_position["x"]
       current_y = self.current_position["y"]
       target_x, target_y, target_theta = target
+
+      # Clear costmaps before starting segmented navigation
+      self.clear_costmaps_callback()
 
       path = []
       dx = target_x - current_x
@@ -129,6 +291,9 @@ class SimpleNavWaypointPlayer:
 
       rospy.loginfo(f"分段导航：生成{len(path)}个中间点")
       for pt in path:
+         # 清除代价图，避免周围人的影响
+         self.clear_costmaps_callback()
+         
          # 尝试导航到每个点
          goal_msg = self._build_move_base_goal(*pt)
          self.goal_pub.publish(goal_msg)
@@ -146,13 +311,21 @@ class SimpleNavWaypointPlayer:
                   break
                if time.time() - start_time > 15.0:  # 每个点最多等待15s
                   rospy.logwarn("分段点导航超时或失败，尝试下一个点")
+                  # 清除代价图再尝试下一个点
+                  self.clear_costmaps_callback()
                   break
+               
+               # 每3秒清除一次代价图
+               if int(time.time() - start_time) % 3 == 0:
+                  self.clear_costmaps_callback()
+               
                rospy.sleep(0.2)
 
       rospy.loginfo("后台点分段导航结束")
+
     def check_navigation_progress(self, event):
         """Check if the robot is making progress toward its goal"""
-        if not self.navigation_active or self.dance_in_progress or self.reached_final:
+        if not self.navigation_active or self.dance_in_progress or self.reached_final or self.using_direct_control:
             return
             
         # Check if we've moved since last check
@@ -171,16 +344,17 @@ class SimpleNavWaypointPlayer:
         if dist_moved < 0.05 and time_diff > 4.0 and self.navigation_active:
             rospy.logwarn(f"[卡住了] 机器人在{time_diff:.1f}秒内只移动了{dist_moved:.3f}米，尝试恢复...")
             
+            # Clear costmaps to try to resolve the stuck situation
+            self.clear_costmaps_callback()
+            
             # Check if we've sent the goal recently
             if self.last_goal_send_time and (current_time - self.last_goal_send_time).to_sec() < 10.0:
                 self.goal_send_retries += 1
                 
                 if self.goal_send_retries >= self.max_goal_retries:
                    
-                   
-                   if  (self.current_waypoint_index -len(self.waypoints))== - 1:
+                   if (self.current_waypoint_index -len(self.waypoints))== - 1:
                       
-                  #  if self.current_waypoint_index == len(self.waypoints) - 1:
                         rospy.logwarn("后台点规划失败，启动分段导航")
                         self.segment_nav_to_backstage(self.waypoints[self.current_waypoint_index])
                         self.reached_final = True
@@ -223,6 +397,9 @@ class SimpleNavWaypointPlayer:
         for _ in range(3):  # Send multiple times to ensure it's received
             self.cancel_pub.publish(cancel_msg)
             rospy.sleep(0.1)
+        
+        # Clear costmaps
+        self.clear_costmaps_callback()
         
         # Stop the robot
         self.stop_robot()
@@ -295,16 +472,16 @@ class SimpleNavWaypointPlayer:
         goal.goal.target_pose.pose.orientation.w = q[3]
         return goal
 
-   #  def odom_callback(self, msg):
-   #      """Get current position from odometry as backup"""
-   #      self.current_position["x"] = msg.pose.pose.position.x
-   #      self.current_position["y"] = msg.pose.pose.position.y
+    def odom_callback(self, msg):
+        """Get current position from odometry"""
+        self.current_position["x"] = msg.pose.pose.position.x
+        self.current_position["y"] = msg.pose.pose.position.y
         
-   #      # Extract angle
-   #      orientation = msg.pose.pose.orientation
-   #      quaternion = (orientation.x, orientation.y, orientation.z, orientation.w)
-   #      euler = tft.euler_from_quaternion(quaternion)
-   #      self.current_position["theta"] = math.degrees(euler[2])
+        # Extract angle
+        orientation = msg.pose.pose.orientation
+        quaternion = (orientation.x, orientation.y, orientation.z, orientation.w)
+        euler = tft.euler_from_quaternion(quaternion)
+        self.current_position["theta"] = math.degrees(euler[2])
 
     def navigate_to_current_waypoint(self, is_retry=False):
         """Navigate to the current waypoint"""
@@ -317,30 +494,74 @@ class SimpleNavWaypointPlayer:
         self.stop_stop_enforcer()
         self.completely_stopped = False
 
-        # Reset for new navigation attempt
-        if not is_retry:
-            self.goal_send_retries = 0
-            
-        # First ensure any previous goals are canceled
-        self.reset_navigation()
-
         # Get current waypoint
         x, y, theta = self.waypoints[self.current_waypoint_index]
         
+        # Clear costmaps before navigation
+        self.clear_costmaps_callback()
+        
         # Determine location description
-      #   if (self.current_waypoint_index == len(self.waypoints) - 1) | (self.current_waypoint_index == len(self.waypoints) - 2):
-           
-        if (self.current_waypoint_index == len(self.waypoints) - 1) :
+        if (self.current_waypoint_index == len(self.waypoints) - 1):
             location_desc = "[返回后台]"
-            #启用旋转
-            # set_rotation(True)
-        elif self.current_waypoint_index==1:
+            # 启用旋转
+            set_rotation(True)
+            # 使用导航栈返回后台
+            self.using_direct_control = False
+            
+            # Reset for new navigation attempt
+            if not is_retry:
+                self.goal_send_retries = 0
+                
+            # First ensure any previous goals are canceled
+            self.reset_navigation()
+            
+            # Publish MoveBaseActionGoal
+            goal_msg = self._build_move_base_goal(x, y, theta)
+            self.goal_pub.publish(goal_msg)
+            self.last_goal_send_time = rospy.Time.now()
+            self.navigation_active = True
+            
+        elif self.current_waypoint_index == 0:
             location_desc = f"[舞蹈位置 {self.current_waypoint_index+1}]"
             print("到达舞台第一个点   禁用旋转")
-            # set_rotation(False)
+            set_rotation(False)
+            self.using_direct_control = False
+            
+            # 使用导航栈到达第一个舞蹈点
+            # Reset for new navigation attempt
+            if not is_retry:
+                self.goal_send_retries = 0
+                
+            # First ensure any previous goals are canceled
+            self.reset_navigation()
+            
+            # Publish MoveBaseActionGoal
+            goal_msg = self._build_move_base_goal(x, y, theta)
+            self.goal_pub.publish(goal_msg)
+            self.last_goal_send_time = rospy.Time.now()
+            self.navigation_active = True
             
         else:
             location_desc = f"[舞蹈位置 {self.current_waypoint_index+1}]"
+            self.using_direct_control = True
+            
+            # 使用直接控制到达其他舞蹈点
+            rospy.loginfo(f"[直接控制模式] 前往{location_desc} x={x}, y={y}, θ={theta}")
+            
+            # 取消任何导航目标
+            cancel_msg = GoalID()
+            self.cancel_pub.publish(cancel_msg)
+            
+            # 使用直接控制
+            self.navigation_active = True
+            # 在新线程中启动直接控制，以避免阻塞主线程
+            control_thread = threading.Thread(
+                target=self.direct_control_waypoint,
+                args=(x, y, theta)
+            )
+            control_thread.daemon = True
+            control_thread.start()
+            return
 
         wait_time = self.wait_times[self.current_waypoint_index] if self.current_waypoint_index < len(self.wait_times) else 0
         prefix = "[重试] " if is_retry else ""
@@ -350,12 +571,6 @@ class SimpleNavWaypointPlayer:
         self.last_position_check["x"] = self.current_position["x"]
         self.last_position_check["y"] = self.current_position["y"]
         self.last_position_check["time"] = rospy.Time.now()
-        
-        # Publish MoveBaseActionGoal
-        goal_msg = self._build_move_base_goal(x, y, theta)
-        self.goal_pub.publish(goal_msg)
-        self.last_goal_send_time = rospy.Time.now()
-        self.navigation_active = True
         
         # Make sure cmd_vel is not zero after setting a new goal
         # This helps in case the robot is "stuck" in a stopped state
@@ -427,6 +642,9 @@ class SimpleNavWaypointPlayer:
         self.dance_in_progress = False
         self.current_waypoint_index += 1
         
+        # Clear costmaps before continuing to next waypoint
+        self.clear_costmaps_callback()
+        
         if self.current_waypoint_index < len(self.waypoints):
             rospy.loginfo(f"移动到路径点 {self.current_waypoint_index+1}/{len(self.waypoints)}")
             self.navigate_to_current_waypoint()
@@ -477,11 +695,10 @@ class SimpleNavWaypointPlayer:
 
     def feedback_callback(self, msg):
         """Handle navigation feedback, detect arrival"""
-        if self.reached_final or self.dance_in_progress:
+        if self.reached_final or self.dance_in_progress or self.using_direct_control:
             return
 
         # Update current position
-        
         current_pose = msg.feedback.base_position.pose
         self.current_position["x"] = current_pose.position.x
         self.current_position["y"] = current_pose.position.y
@@ -491,27 +708,26 @@ class SimpleNavWaypointPlayer:
         euler = tft.euler_from_quaternion(quaternion)
         self.current_position["theta"] = math.degrees(euler[2])
 
-      # Get current waypoint
+        # Get current waypoint
         x, y, target_yaw = self.waypoints[self.current_waypoint_index]
 
-      # Calculate distance to target
+        # Calculate distance to target
         dx = current_pose.position.x - x
         dy = current_pose.position.y - y
         dist = math.hypot(dx, dy)
 
-      # Calculate angular difference
+        # Calculate angular difference
         current_yaw = self.current_position["theta"]  # Assuming this is in degrees
         d_yaw = abs(current_yaw - target_yaw)
-       # Normalize to the range [0, 180]
+        # Normalize to the range [0, 180]
         if d_yaw > 180:
            d_yaw = 360 - d_yaw
 
-      # Log information
+        # Log information
         rospy.loginfo_throttle(2, f"[当前位置] ({current_pose.position.x:.2f}, {current_pose.position.y:.2f}) -> 距离目标: {dist:.2f} 米, 角度差: {d_yaw:.2f} 度")
 
-      # Check if we've reached the waypoint
+        # Check if we've reached the waypoint
         if dist <= self.threshold and d_yaw <= self.threshold_yaw and not self.dance_in_progress:
-      #   if dist <= self.threshold and not self.dance_in_progress and :
             rospy.loginfo(f"到达路径点 {self.current_waypoint_index+1}")
             self.navigation_active = False
             self.dance_in_progress = True
@@ -525,6 +741,7 @@ class SimpleNavWaypointPlayer:
             dance_thread = threading.Thread(target=self.execute_dance_and_wait)
             dance_thread.daemon = True
             dance_thread.start()
+
 def set_rotation(enable: bool):
     rospy.wait_for_service('/unitree_cmd_vel_controller/set_rotation_enabled')
     try:
@@ -536,7 +753,7 @@ def set_rotation(enable: bool):
 
 if __name__ == "__main__":
    
-   #  set_rotation(True)   #先启用 第一个点后禁用旋转
+    set_rotation(True)   #先启用 第一个点后禁用旋转
     rospy.init_node("simple_nav_waypoints_player")
     parser = argparse.ArgumentParser(description='Navigation Dance Performance Controller')
     parser.add_argument('--dance', type=str, default='A', 
@@ -550,15 +767,15 @@ if __name__ == "__main__":
 
     dance_choreography = {
         'A': [
-            ((-3.6, 3.4, 170), 30.0),
-            ((-3.4, 3.4, 180), 40.0),
-            ((-3.2, 3.4, -170), 20.0),
+            ((-3.6, 3.4, 170), 60.0),
+            ((-3.4, 3.4, 180), 70.0),
+            ((-3.2, 3.4, -170), 60.0),
         ],
         'B': [
-            ((-2.1, 3.4, 170), 3.0),
-            ((-2.3, 3.4, 180), 4.0),
-            ((-2.6, 3.4, -170), 2.0),
-            ((-1.5, 3.4, 180), 2.5),
+            ((4.18, 1.15, -159), 2.0),
+            ((-3.5, 0.5, 90), 4.0),
+            ((2.3, 1.7, -45), 3.0),
+            ((-1.5, -1.2, 180), 2.5),
         ],
         'Up': [
             ((4.18, 1.15, -159), 2.5),
@@ -589,9 +806,10 @@ if __name__ == "__main__":
             ((3.0, 3.0, 45), 3.0),
         ],
         'Y': [
-            ((-3.6, 3.4, 170), 30.0),
-            ((-3.4, 3.4, 180), 40.0),
-            ((-3.2, 3.4, -170), 20.0),
+            ((4.18, 1.15, -159), 2.5),
+            ((0.0, 3.0, 90), 3.0),
+            ((-2.0, 0.0, 180), 4.0),
+            ((2.0, 0.0, 0), 3.5),
         ]
     }
     

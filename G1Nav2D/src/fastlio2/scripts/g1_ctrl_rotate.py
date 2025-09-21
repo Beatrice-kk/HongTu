@@ -4,7 +4,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Path
 import math
 from collections import deque
-from typing import Deque, Tuple
+from typing import Deque
 from std_srvs.srv import SetBool, SetBoolResponse
 
 # 假设 unitree_sdk2py 已经正确安装
@@ -13,10 +13,10 @@ from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
 
 class CmdVelController:
     """
-    Controller for Unitree G1 robot with dynamic rotation control and velocity smoothing
+    Controller for Unitree G1 robot with dynamic rotation control
     """
     def __init__(self, network_interface: str):
-        rospy.loginfo("Initializing Unitree Controller with Oscillation Detection and Velocity Smoothing...")
+        rospy.loginfo("Initializing Unitree Controller with Oscillation Detection...")
         
         # --- 参数初始化 ---
         self._load_ros_params()
@@ -28,9 +28,6 @@ class CmdVelController:
             f"cooldown={self.COOLDOWN_DURATION:.1f}s\n"
             f"  - Velocity Thresholds: linear={self.VEL_LINEAR_THRESHOLD:.3f} m/s, "
             f"angular={self.VEL_ANGULAR_THRESHOLD:.3f} rad/s\n"
-            f"  - Smoothing: linear_rate={self.LINEAR_SMOOTHING_RATE:.2f}, "
-            f"angular_rate={self.ANGULAR_SMOOTHING_RATE:.2f}, "
-            f"update_freq={self.SMOOTHING_UPDATE_FREQ:.1f}Hz\n"
             f"  - Initial Rotation Control: flag_rotate={self.flag_rotate} "
             f"(0=avoid rotation, 1=normal rotation)"
         )
@@ -41,23 +38,6 @@ class CmdVelController:
         self.wz_buffer: Deque[float] = deque(maxlen=self.WZ_BUFFER_SIZE)
         self.cooldown_active: bool = False
         self.cooldown_end_time: rospy.Time = rospy.Time.now()
-        
-        # --- 速度平滑变量 ---
-        # 当前的目标速度（从cmd_vel接收）
-        self.target_vx: float = 0.0
-        self.target_vy: float = 0.0
-        self.target_wz: float = 0.0
-        
-        # 当前实际发送给机器人的速度
-        self.current_vx: float = 0.0
-        self.current_vy: float = 0.0
-        self.current_wz: float = 0.0
-        
-        # 上次接收到命令的时间戳
-        self.last_cmd_time: rospy.Time = rospy.Time.now()
-        
-        # 上次速度平滑更新的时间戳
-        self.last_smoothing_time: rospy.Time = rospy.Time.now()
 
         # --- SDK初始化 ---
         rospy.loginfo("Initializing Unitree LocoClient...")
@@ -79,11 +59,6 @@ class CmdVelController:
         self.rotation_service = rospy.Service('~set_rotation_enabled', SetBool, self.set_rotation_enabled)
         rospy.loginfo("Rotation control service is now available at: " + 
                       rospy.get_name() + "/set_rotation_enabled")
-        
-        # 添加速度平滑更新定时器
-        update_period = 1.0 / self.SMOOTHING_UPDATE_FREQ
-        self.smoothing_timer = rospy.Timer(rospy.Duration(update_period), self.smoothing_update)
-        rospy.loginfo(f"Velocity smoothing timer started with period: {update_period:.3f}s")
 
     def _load_ros_params(self):
         """从 ROS 参数服务器加载所有参数。"""
@@ -96,89 +71,6 @@ class CmdVelController:
         self.VEL_ANGULAR_THRESHOLD = rospy.get_param("~vel_angular_threshold", 0.05)
         # 旋转控制参数 - 使用实例变量以便动态修改
         self.flag_rotate = rospy.get_param("~flag_rotate", 1)  # 默认值为1，允许正常旋转
-        
-        # 速度平滑参数
-        self.LINEAR_SMOOTHING_RATE = rospy.get_param("~linear_smoothing_rate", 0.3)  # 线性速度平滑率
-        self.ANGULAR_SMOOTHING_RATE = rospy.get_param("~angular_smoothing_rate", 0.2)  # 角速度平滑率
-        self.SMOOTHING_UPDATE_FREQ = rospy.get_param("~smoothing_update_freq", 20.0)  # 平滑更新频率(Hz)
-        self.MAX_LINEAR_CHANGE_RATE = rospy.get_param("~max_linear_change_rate", 0.5)  # 最大线性速度变化率(m/s²)
-        self.MAX_ANGULAR_CHANGE_RATE = rospy.get_param("~max_angular_change_rate", 1.0)  # 最大角速度变化率(rad/s²)
-
-    def smoothing_update(self, event):
-        """
-        基于当前目标速度更新平滑后的实际速度，并发送到机器人
-        这个函数由定时器定期调用，确保平滑过渡
-        """
-        # 如果正在冷却或路径无效，则不更新
-        if self._is_in_cooldown() or not self.path_is_valid:
-            return
-            
-        # 计算自上次更新以来的时间
-        now = rospy.Time.now()
-        dt = (now - self.last_smoothing_time).to_sec()
-        self.last_smoothing_time = now
-        
-        # 限制每次更新的最大变化量
-        max_linear_change = self.MAX_LINEAR_CHANGE_RATE * dt
-        max_angular_change = self.MAX_ANGULAR_CHANGE_RATE * dt
-        
-        # 计算平滑后的线性速度 (vx, vy)
-        self.current_vx = self._smooth_value(
-            self.current_vx, self.target_vx, 
-            self.LINEAR_SMOOTHING_RATE, max_linear_change
-        )
-        self.current_vy = self._smooth_value(
-            self.current_vy, self.target_vy, 
-            self.LINEAR_SMOOTHING_RATE, max_linear_change
-        )
-        
-        # 计算平滑后的角速度 (wz)
-        self.current_wz = self._smooth_value(
-            self.current_wz, self.target_wz, 
-            self.ANGULAR_SMOOTHING_RATE, max_angular_change
-        )
-        
-        # 检查是否需要发送命令（速度足够大）
-        linear_vel_magnitude = math.hypot(self.current_vx, self.current_vy)
-        if (linear_vel_magnitude < self.VEL_LINEAR_THRESHOLD and 
-            abs(self.current_wz) < self.VEL_ANGULAR_THRESHOLD):
-            # 速度太小，跳过发送
-            return
-            
-        # 将平滑后的速度发送给机器人
-        rospy.loginfo_throttle(1.0, 
-            f"Smoothed vel: vx={self.current_vx:.2f}, vy={self.current_vy:.2f}, wz={self.current_wz:.2f} "
-            f"(target: vx={self.target_vx:.2f}, vy={self.target_vy:.2f}, wz={self.target_wz:.2f})"
-        )
-        try:
-            self.sport_client.Move(self.current_vx, self.current_vy, self.current_wz)
-        except Exception as e:
-            rospy.logerr(f"Failed to send smoothed Move command: {e}")
-
-    def _smooth_value(self, current: float, target: float, 
-                     smoothing_rate: float, max_change: float) -> float:
-        """
-        平滑地将当前值过渡到目标值
-        
-        Args:
-            current: 当前值
-            target: 目标值
-            smoothing_rate: 平滑率(0~1)，越大变化越快
-            max_change: 单次更新允许的最大变化量
-            
-        Returns:
-            平滑后的新值
-        """
-        # 计算差值并应用平滑系数
-        diff = target - current
-        change = diff * smoothing_rate
-        
-        # 限制变化量不超过最大允许值
-        if abs(change) > max_change:
-            change = math.copysign(max_change, change)
-            
-        # 返回新值
-        return current + change
 
     def set_rotation_enabled(self, req):
         """ROS服务回调，用于设置flag_rotate参数"""
@@ -240,20 +132,28 @@ class CmdVelController:
                 wz *= 0.8
                 rospy.loginfo_throttle(2.0, f"Reduced rotation from {original_wz:.2f} to {wz:.2f} rad/s")
         
-        # 更新目标速度（将由平滑器逐渐达到）
-        self.target_vx = vx
-        self.target_vy = vy
-        self.target_wz = wz
-        
-        # 更新角速度缓冲区（用于震荡检测）
         self.wz_buffer.append(wz)
-        self.last_valid_cmd_time = rospy.Time.now()
-        
-        # 检查震荡
+
+        # 3. 检查是否发生震荡
         if self._check_for_oscillation():
             rospy.logwarn("Oscillation detected! Activating cooldown.")
             self._start_cooldown()
             self.force_stop()
+            return
+
+        # 4. 忽略过小的指令
+        linear_vel_magnitude = math.hypot(vx, vy)
+        if linear_vel_magnitude < self.VEL_LINEAR_THRESHOLD and abs(wz) < self.VEL_ANGULAR_THRESHOLD:
+            rospy.loginfo_throttle(5.0, f"Ignoring small cmd_vel (v={linear_vel_magnitude:.3f}, w={wz:.3f}) below threshold.")
+            return
+
+        # 5. 执行有效指令
+        self.last_valid_cmd_time = rospy.Time.now()
+        rospy.loginfo_throttle(1.0, f"Executing cmd_vel: vx={vx:.2f}, vy={vy:.2f}, wz={wz:.2f}")
+        try:
+            self.sport_client.Move(vx, vy, wz)
+        except Exception as e:
+            rospy.logerr(f"Failed to send Move command: {e}")
 
     def check_cmd_timeout(self, event):
         """定时检查指令是否超时，确保安全。"""
@@ -265,14 +165,6 @@ class CmdVelController:
     def force_stop(self):
         """发送明确的停止指令并清空历史角速度，以防影响下一次判断。"""
         rospy.loginfo("Executing FORCE STOP.")
-        # 重置目标速度和当前速度
-        self.target_vx = 0.0
-        self.target_vy = 0.0
-        self.target_wz = 0.0
-        self.current_vx = 0.0
-        self.current_vy = 0.0
-        self.current_wz = 0.0
-        
         try:
             self.sport_client.StopMove()
         except Exception as e:

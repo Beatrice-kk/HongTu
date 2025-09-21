@@ -2,14 +2,14 @@
 
 # 1. 地图设置
 # Pre-processed PCD map file path (absolute path)
-map_pcd_path: "/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD/platform_1_2.pcd" # <-- 修改这里：请填写您的地图文件的绝对路径
+map_pcd_path: "/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD/platform_1_3.pcd" # <-- 修改这里：请填写您的地图文件的绝对路径
 
 # 2. 初始位置估计
 # The approximate starting position of the robot.
 # We assume this is a fixed starting point, e.g., a charging station.
 initial_pose:
   # x: -1.65
-  x: 1.2
+  x: 0.0
   y: 0.0
 
 # 3. 自动朝向搜索参数
