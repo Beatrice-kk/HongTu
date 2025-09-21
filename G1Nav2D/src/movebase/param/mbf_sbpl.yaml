@@ -1,10 +1,10 @@
 planners:
-  - name: SBPLLatticePlanner
-    type: SBPLLatticePlanner
+    - name: SBPLLatticePlanner
+      type: SBPLLatticePlanner
 
 controllers:
-  - name: TebLocalPlannerROS
-    type: teb_local_planner/TebLocalPlannerROS
+    - name: TebLocalPlannerROS
+      type: teb_local_planner/TebLocalPlannerROS
 
 planner_frequency: 0.0
 planner_patience: 3.0

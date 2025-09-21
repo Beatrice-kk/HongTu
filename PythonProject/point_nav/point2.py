@@ -21,7 +21,7 @@ class NavPointPlayer:
         self.reached = False
 
         # 发布导航目标（MoveBaseActionGoal）
-        self.goal_pub = rospy.Publisher("/move_base/goal", MoveBaseActionGoal, queue_size=1)
+        self.goal_pub = rospy.Publisher("", MoveBaseActionGoal, queue_size=1)
         # 订阅 /move_base/feedback 获取当前位姿
         self.feedback_sub = rospy.Subscriber("/move_base/feedback", MoveBaseActionFeedback, self.feedback_callback)
 
