@@ -32,7 +32,7 @@ class SimpleNavWaypointPlayer:
         self.wait_times = [wait for _, wait in self.dance_sequence]
         
         # Build complete waypoint sequence
-        self.waypoints = dance_waypoints  +[backstage_pos]
+        self.waypoints = dance_waypoints +[door_pos] +[backstage_pos]
         rospy.loginfo(f"总路径点数量: {len(self.waypoints)}，舞蹈点: {len(dance_waypoints)}，最后还会回到: {backstage_pos}")
       
         self.threshold = threshold
@@ -175,7 +175,10 @@ class SimpleNavWaypointPlayer:
                 
                 if self.goal_send_retries >= self.max_goal_retries:
                    
-                   if self.current_waypoint_index == len(self.waypoints) - 1:
+                   
+                   if (self.current_waypoint_index -len(self.waypoints))== - 2| (self.current_waypoint_index -len(self.waypoints))== - 1:
+                      
+                  #  if self.current_waypoint_index == len(self.waypoints) - 1:
                         rospy.logwarn("后台点规划失败，启动分段导航")
                         self.segment_nav_to_backstage(self.waypoints[self.current_waypoint_index])
                         self.reached_final = True
@@ -323,7 +326,7 @@ class SimpleNavWaypointPlayer:
         x, y, theta = self.waypoints[self.current_waypoint_index]
         
         # Determine location description
-        if self.current_waypoint_index == len(self.waypoints) - 1:
+        if (self.current_waypoint_index == len(self.waypoints) - 1) | (self.current_waypoint_index == len(self.waypoints) - 2):
             location_desc = "[返回后台]"
             #启用旋转
             set_rotation(True)
@@ -331,7 +334,6 @@ class SimpleNavWaypointPlayer:
             location_desc = f"[舞蹈位置 {self.current_waypoint_index+1}]"
             print("到达舞台第一个点   禁用旋转")
             set_rotation(False)
-
             
         else:
             location_desc = f"[舞蹈位置 {self.current_waypoint_index+1}]"
