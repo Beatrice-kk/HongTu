@@ -159,7 +159,7 @@ class G1ActionPlayer:
         
         # 预设TTS文本配置
         self.tts_presets = {
-            'A': "亲爱的游客朋友们，大家好！欢迎光临国家5A级旅游景区——沙家浜！这里不仅是一座风光秀美的江南水乡，更是一方承载着“芦荡火种、鱼水情深”红色记忆的圣地。在这里，您可以走进沙家浜革命历史纪念馆，聆听那段可歌可泣的英雄故事，感受新四军与人民群众并肩作战的烽火岁月；也可以漫步芦苇荡间，乘一叶轻舟穿梭于碧波芦海，享受水乡的宁静野趣，领略独特的湿地风情；还可以来到横泾老街，漫步于上世纪三四十年代风貌的街巷，观看精彩的民俗表演，品尝地道的水乡美食，沉浸式体验淳朴悠然的江南民俗。沙家浜，是一幅自然与人文交织的画卷，更是一段值得用心感受的历史。愿您在这里度过一段充实而美好的时光！",
+            'A': "亲爱的游客朋友们，大家好！欢迎光临国家5诶级旅游景区——沙家浜！这里不仅是一座风光秀美的江南水乡，更是一方承载着“芦荡火种、鱼水情深”红色记忆的圣地。在这里，您可以走进沙家浜革命历史纪念馆，聆听那段可歌可泣的英雄故事，感受新四军与人民群众并肩作战的烽火岁月；也可以漫步芦苇荡间，乘一叶轻舟穿梭于碧波芦海，享受水乡的宁静野趣，领略独特的湿地风情；还可以来到横泾老街，漫步于上世纪三四十年代风貌的街巷，观看精彩的民俗表演，品尝地道的水乡美食，沉浸式体验淳朴悠然的江南民俗。沙家浜，是一幅自然与人文交织的画卷，更是一段值得用心感受的历史。愿您在这里度过一段充实而美好的时光！",
             'B': "各位朋友，大家好。在江南水乡沙家浜，曾镌刻下一段军民同心、共抗敌寇的红色记忆。这里有指导员郭建光的壮志凌云，有阿庆嫂的机智沉着，有沙奶奶的慈爱坚毅，也有与敌人周旋的惊心动魄。接下来，让我们循着京剧《沙家浜》的经典旋律，一同穿越烽火岁月，重温那段充满斗争智慧与深厚情谊的历史！",
             'C': "各位朋友，经典的唱腔余韵悠长，烽火里的故事依旧动人。我们刚刚一同重温了郭建光的壮志、沙奶奶的坚韧，也深深记住了阿庆嫂“垒起七星灶”的过人智慧，更读懂了那份跨越岁月的军民鱼水情。本场沙家浜京剧选段演出到此圆满结束，感谢您的驻足与陪伴，我们下次再会！",
             'D': "各位朋友，大家好！欢迎来到秋意浓浓的沙家浜！眼下芦苇泛黄、蟹肥菊香，正是赏秋好时候。接下来我们将登上手摇船畅游芦苇荡，登船时请务必注意脚下安全。祝愿大家在此度过一段难忘的秋日时光！"
@@ -181,7 +181,7 @@ class G1ActionPlayer:
         # 状态与时间
         self.state = "stopped"
         self.ramp_in_duration = 0.8        # 平滑进入时间
-        self.move_to_initial_duration = 2.5  # 回到初始姿态的时间
+        self.move_to_initial_duration = 1.5  # 回到初始姿态的时间，从2.5秒调整为1.5秒，加快回到初始姿态的速度
         self.ramp_start_time = None
         self.start_time = None
         self.current_frame = 0
@@ -204,7 +204,7 @@ class G1ActionPlayer:
         self.base_kd_arm = 5      # 从3.0增加以提高阻尼
         
         # 动作幅度缩放因子 (减小动作幅度以提高平滑性和平衡性)
-        self.action_scale_factor = 0.9  # 缩放到70%的动作幅度
+        self.action_scale_factor = 0.7  # 缩放到70%的动作幅度
         
         # 添加关节速度限制参数以提高平滑性
         self.max_joint_velocity = 1.0   # 最大关节速度 (rad/s)
@@ -967,6 +967,13 @@ class G1ActionPlayer:
             time.sleep(0.1)
             # 初始化完成后设置状态为stopped，避免持续发送指令
             self.state = "stopped"
+            # 主动释放手臂
+            if self.arm_action_client and self.action_map:
+                try:
+                    self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
+                    print("✅ 手臂已释放")
+                except Exception as e:
+                    print(f"⚠️ 释放手臂时出错: {e}")
             return
             
         # 平滑过渡到目标位置
@@ -1003,6 +1010,169 @@ class G1ActionPlayer:
         
         # 初始化完成后设置状态为stopped，避免持续发送指令
         self.state = "stopped"
+        
+        # 主动释放手臂
+        if self.arm_action_client and self.action_map:
+            try:
+                self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
+                print("✅ 手臂已释放")
+            except Exception as e:
+                print(f"⚠️ 释放手臂时出错: {e}")
+
+    def _send_pose(self, target_pose, dq=np.zeros(15), kp_scale=1.0, kd_scale=1.0):
+        """
+        发送目标姿态命令
+        """
+        if self.state != "stopped":
+            print("⚠️ 机器人正在移动，无法发送新的姿态命令")
+            return
+
+        self.state = "moving"
+        self.target_pose = target_pose
+        self.target_dq = dq
+        self.kp_scale = kp_scale
+        self.kd_scale = kd_scale
+
+    def _send_velocity(self, target_dq, kp_scale=1.0, kd_scale=1.0):
+        """
+        发送目标速度命令
+        """
+        if self.state != "stopped":
+            print("⚠️ 机器人正在移动，无法发送新的速度命令")
+            return
+
+        self.state = "moving"
+        self.target_dq = target_dq
+        self.kp_scale = kp_scale
+        self.kd_scale = kd_scale
+
+    def _send_torque(self, target_tau, kp_scale=1.0, kd_scale=1.0):
+        """
+        发送目标力矩命令
+        """
+        if self.state != "stopped":
+            print("⚠️ 机器人正在移动，无法发送新的力矩命令")
+            return
+
+        self.state = "moving"
+        self.target_tau = target_tau
+        self.kp_scale = kp_scale
+        self.kd_scale = kd_scale
+
+    def _send_command(self):
+        """
+        发送当前命令
+        """
+        if self.state == "stopped":
+            return
+
+        if self.target_pose is not None:
+            self._send_pose(self.target_pose, self.target_dq, self.kp_scale, self.kd_scale)
+        elif self.target_dq is not None:
+            self._send_velocity(self.target_dq, self.kp_scale, self.kd_scale)
+        elif self.target_tau is not None:
+            self._send_torque(self.target_tau, self.kp_scale, self.kd_scale)
+
+    def _initialize(self, target_pose):
+        """
+        初始化到预设安全位置
+        """
+        start_pose = self.get_current_pose()
+        position_diff = np.linalg.norm(start_pose[:3] - target_pose[:3])
+        print(f"📏 起始位置与目标位置差异: {position_diff:.3f}")
+        if position_diff < 0.05:  # 如果差异小于0.05弧度，则认为已经在位置上
+            print("✅ 已经在目标位置附近，跳过平滑过渡")
+            self.startup_pose = target_pose.copy()
+            # 初始化完成后设置状态为stopped，避免持续发送指令
+            self.state = "stopped"
+            # 发送一次位置命令确保位置稳定
+            self._send_pose(target_pose, dq=np.zeros(15), kp_scale=0.3, kd_scale=1.0)
+            time.sleep(0.1)
+            # 主动释放手臂
+            if self.arm_action_client and self.action_map:
+                try:
+                    self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
+                    print("✅ 手臂已释放")
+                except Exception as e:
+                    print(f"⚠️ 释放手臂时出错: {e}")
+            return
+
+        # 平滑过渡到目标位置
+        print("🔄 开始平滑过渡到预设安全位置...")
+        duration = 3.0  # 减少过渡时间从4秒到3秒，减少等待时间
+        start_time = time.time()
+        
+        # 保存当前发送的姿态用于速度计算
+        last_sent_pose = start_pose.copy()
+        
+        while True:
+            elapsed = time.time() - start_time
+            ratio = min(elapsed / duration, 1.0)
+            if ratio >= 1.0:
+                break
+                
+            # 使用标准平滑步进插值，在响应速度和平滑度之间取得平衡
+            smooth_ratio = ratio * ratio * (3 - 2 * ratio)
+            
+            # 计算当前目标位置
+            current_target = (1 - smooth_ratio) * start_pose + smooth_ratio * target_pose
+            
+            # 添加关节速度限制以减少抖动
+            dt = 0.025  # 与动作播放期间相同的发送频率 (40Hz)
+            theoretical_velocity = (current_target - last_sent_pose) / dt
+            
+            # 限制关节速度
+            velocity_limited_target = np.zeros_like(current_target)
+            for i in range(len(current_target)):
+                max_vel = self.max_joint_velocity  # 使用与动作播放期间相同的速度限制
+                actual_vel = theoretical_velocity[i]
+                if abs(actual_vel) > max_vel:
+                    # 限制速度
+                    velocity_limited_target[i] = last_sent_pose[i] + np.sign(actual_vel) * max_vel * dt
+                else:
+                    velocity_limited_target[i] = current_target[i]
+            
+            current_target = velocity_limited_target
+            last_sent_pose = current_target.copy()
+            
+            # 发送命令，使用与动作播放期间相同的控制参数
+            kp_scale = 0.8 + 0.2 * smooth_ratio  # 保持良好的跟踪性能
+            kd_scale = 0.9 + 0.1 * smooth_ratio  # 适度的阻尼控制以减少抖动
+            self._send_pose(current_target, dq=np.zeros(15), kp_scale=kp_scale, kd_scale=kd_scale)
+            time.sleep(0.025)  # 提高控制频率到40Hz，保持一致
+            
+        # 确保最终位置，使用更平滑的方式
+        # 发送最终位置命令几次以确保稳定
+        for _ in range(3):
+            self._send_pose(target_pose, dq=np.zeros(15), kp_scale=1.0, kd_scale=1.0)
+            time.sleep(0.05)
+        
+        # 保存这个预设位置作为初始姿态
+        self.startup_pose = target_pose.copy()
+        print("✅ 初始化到预设安全位置完成")
+        print(f"📍 当前位置: {target_pose[:3]}")
+        
+        # 初始化完成后设置状态为stopped，避免持续发送指令
+        self.state = "stopped"
+        
+        # 主动释放手臂
+        if self.arm_action_client and self.action_map:
+            try:
+                self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
+                print("✅ 手臂已释放")
+            except Exception as e:
+                print(f"⚠️ 释放手臂时出错: {e}")
+            
+            # 禁用臂部控制
+            try:
+                self.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
+                self.low_cmd.crc = self.crc.Crc(self.low_cmd)
+                self.publisher.Write(self.low_cmd)
+                print("✅ 臂部控制已禁用")
+            except Exception as e:
+                print(f"⚠️ 禁用臂部控制时出错: {e}")
+        
+        return
         
         # 初始化完成，移除灯光控制
         try:
@@ -1066,7 +1236,20 @@ class G1ActionPlayer:
         self._send_pose(interp_q, dq=np.zeros(15), kp_scale=kp_scale, kd_scale=kd_scale)
 
     def _send_frame(self, frame_idx):
+        # 获取原始动作帧数据
         q = self.action_data[frame_idx]
+        
+        # 应用动作幅度缩放因子以减小动作幅度但保持时间节奏
+        # 从初始姿态开始计算差异并应用缩放
+        if hasattr(self, 'startup_pose') and self.startup_pose is not None:
+            start_q = self.startup_pose
+        else:
+            start_q = self.initial_pose
+            
+        # 计算与起始姿态的差异并应用缩放
+        diff = q - start_q
+        scaled_q = start_q + diff * self.action_scale_factor
+        
         # 在动作播放过程中使用优化的控制参数，在流畅度和力度之间取得平衡
         # 使用适度的平滑函数来调整控制参数
         progress = frame_idx / len(self.action_data) if len(self.action_data) > 0 else 0
@@ -1077,7 +1260,7 @@ class G1ActionPlayer:
         kp_scale = 0.8 + 0.2 * smooth_factor  # 保持良好的跟踪性能
         kd_scale = 0.9 + 0.1 * smooth_factor  # 适度的阻尼控制以减少抖动
         
-        self._send_pose(q, dq=np.zeros(15), kp_scale=kp_scale, kd_scale=kd_scale)
+        self._send_pose(scaled_q, dq=np.zeros(15), kp_scale=kp_scale, kd_scale=kd_scale)
 
 
     def setup_publisher(self):
@@ -1088,6 +1271,10 @@ class G1ActionPlayer:
         # 不在初始化时发送任何命令，避免强制移动关节
 
     def _send_pose(self, q, dq=None, kp_scale=1.0, kd_scale=1.0):
+        # 在stopped状态下不发送任何控制指令
+        if self.state == "stopped":
+            return
+            
         # 限制发送频率以减少CPU使用
         current_time = time.time()
         if not hasattr(self, '_last_send_time'):
@@ -1095,8 +1282,8 @@ class G1ActionPlayer:
             
         # 在动作播放期间提高发送频率到25ms一次 (~40Hz)，其他时候保持40ms
         # 降低频率以减少抖动
-        if self.state in ["ramp_in", "playing"]:
-            send_interval = 0.025  # 动作播放期间40Hz
+        if self.state in ["ramp_in", "playing", "move_to_initial"]:
+            send_interval = 0.025  # 动作播放期间和回到初始位置时都使用40Hz
         else:
             send_interval = 0.04   # 其他时候25Hz
             
@@ -1113,19 +1300,19 @@ class G1ActionPlayer:
             dq = np.zeros(15)
 
         # 根据状态调整控制参数，优化以减少电机抖动
-        if self.state in ["ramp_in", "playing"]:
-            # 动作播放期间使用更适合的控制参数
+        if self.state in ["ramp_in", "playing", "move_to_initial"]:
+            # 动作播放期间和回到初始位置时使用更适合的控制参数
             # 显著降低Kp值以减少抖动，增加Kd值以提高阻尼
             kp_waist = self.base_kp_waist * kp_scale * 0.7   # 进一步降低腰部Kp值
             kp_arm = self.base_kp_arm * kp_scale * 0.6       # 进一步降低手臂Kp值
             kd_waist = self.base_kd_waist * kd_scale * 1.5   # 增加腰部Kd值
-            kd_arm = self.base_kd_arm * kd_scale * 1.8       # 增加手臂Kd值
+            kd_arm = self.base_kd_arm * kd_scale * 1.8       # 增加手臂Kd값
         else:
             # 其他状态保持平滑控制
             kp_waist = self.base_kp_waist * kp_scale * 0.5   # 显著降低腰部Kp值
             kp_arm = self.base_kp_arm * kp_scale * 0.4       # 显著降低手臂Kp值
-            kd_waist = self.base_kd_waist * kd_scale * 1.8   # 显著增加腰部Kd值
-            kd_arm = self.base_kd_arm * kd_scale * 2.2       # 显著增加手臂Kd值
+            kd_waist = self.base_kd_waist * kd_scale * 1.8   # 显著增加腰部Kd값
+            kd_arm = self.base_kd_arm * kd_scale * 2.2       # 显著增加手臂Kd값
 
         # 腰部
         c = cmd.motor_cmd[G1JointIndex.WaistYaw]
@@ -1233,6 +1420,11 @@ class G1ActionPlayer:
             else:
                 # 如果没有当前位置反馈，使用初始姿态
                 self.transition_start_pose = self.startup_pose if hasattr(self, 'startup_pose') and self.startup_pose is not None else self.initial_pose
+        elif self.state == "move_to_initial":
+            # 如果已经在回到初始姿态的过程中，不直接完成
+            # 而是让update方法中的move_to_initial状态处理逻辑继续执行直到完成
+            print("🔄 已在回到初始姿态过程中，等待平滑过渡完成")
+            pass
         elif self.state == "move_to_initial":
             # 如果已经在回到初始姿态的过程中，直接完成
             # 主动释放手臂
@@ -1359,6 +1551,11 @@ class G1ActionPlayer:
                 
                 # 逐段播放
                 for i, segment in enumerate(segments):
+                    # 检查是否应该停止播放
+                    if not self.tts_playing or self.state == "stopped":
+                        print("⏹️ TTS播放被中断")
+                        break
+                    
                     print(f"[DEBUG] 播放TTS文本段 {i+1}/{len(segments)}: {segment}")
                     result = self.audio_processor.audio_client.TtsMaker(segment, speaker_id)
                     if result != 0:
@@ -1368,11 +1565,25 @@ class G1ActionPlayer:
                         result = self.audio_processor.audio_client.TtsMaker(segment, speaker_id)
                         if result != 0:
                             print(f"⚠️  TTS播放重试失败，错误码: {result}")
-                    # 等待当前段播放完成
+                    # 等待当前段播放完成，但定期检查中断信号
                     wait_time = max(1.0, len(segment) * 0.2)  # 每字符0.2秒
-                    time.sleep(wait_time)
+                    elapsed = 0
+                    check_interval = 1.0  # 每秒检查一次中断信号
+                    while elapsed < wait_time and self.tts_playing and self.state != "stopped":
+                        sleep_time = min(check_interval, wait_time - elapsed)
+                        time.sleep(sleep_time)
+                        elapsed += sleep_time
+                
+                # 如果循环正常结束，说明所有段都播放完成
+                if self.tts_playing and self.state != "stopped":
+                    print("✅ TTS文本分段播放完成")
             else:
                 # 文本长度适中，直接播放
+                # 检查是否应该停止播放
+                if not self.tts_playing or self.state == "stopped":
+                    print("⏹️ TTS播放被中断")
+                    return
+                
                 result = self.audio_processor.audio_client.TtsMaker(text, speaker_id)
                 if result != 0:
                     print(f"⚠️  TTS播放返回错误码: {result}")
@@ -1381,129 +1592,38 @@ class G1ActionPlayer:
                     result = self.audio_processor.audio_client.TtsMaker(text, speaker_id)
                     if result != 0:
                         print(f"⚠️  TTS播放重试失败，错误码: {result}")
-                # 等待播放完成
+                # 等待播放完成，但定期检查中断信号
                 wait_time = max(2.0, min(15.0, len(text) * 0.2))  # 每字符0.2秒，最多等待15秒
                 print(f"[DEBUG] TTS文本长度: {len(text)}, 等待时间: {wait_time:.1f}秒")
-                time.sleep(wait_time)
+                elapsed = 0
+                check_interval = 1.0  # 每秒检查一次中断信号
+                while elapsed < wait_time and self.tts_playing and self.state != "stopped":
+                    sleep_time = min(check_interval, wait_time - elapsed)
+                    time.sleep(sleep_time)
+                    elapsed += sleep_time
+                
+                # 如果正常结束等待，说明播放完成
+                if self.tts_playing and self.state != "stopped":
+                    print("✅ TTS文本播放完成")
             return True
         except Exception as e:
             print(f"❌ TTS播放失败: {e}")
             return False
 
-            
-        # 定期检查音频播放状态
-        current_time = time.time()
-        if current_time - self._last_audio_check_time >= self._audio_check_interval:
-            self._last_audio_check_time = current_time
-            
-            try:
-                # 查询音频播放状态
-                if self.audio_processor and hasattr(self.audio_processor, 'audio_client'):
-                    status = self.audio_processor.audio_client.GetPlayStatus()
-                    # 如果状态不是播放中，认为播放完成
-                    if status != 1:  # 假设1表示播放中
-                        print(f"🔍 音频播放状态: {status}")
-                        return True
-            except Exception as e:
-                print(f"❌ 检查音频状态失败: {e}")
-                return True
-                
-        return False
-
-    def toggle_pause(self):
-        if self.state == "playing":
-            self.stop_play()
-        elif self.state in ["stopped", "soft_hold", "soft_hold_zero"]:
-            # 这里可以添加恢复播放的逻辑
-            pass
-            
     def _play_tts_only(self, text, speaker_id=0):
         """
-        仅播放TTS文本（不播放动作）
+        仅播放TTS文本（无动作）
         
         Args:
-            text: 要播放的文本
+            text: 要播放的TTS文本
             speaker_id: 说话人ID
         """
         try:
             # 设置TTS播放状态为True
             self.tts_playing = True
             
-            # 根据测试，单次TTS文本建议不超过150字符以确保稳定性
-            max_length = 150
-            if len(text) > max_length:
-                # 更智能的文本分割方法
-                segments = []
-                # 先按句子分割
-                import re
-                sentences = re.split(r'[。！？；;.!?;]', text)
-                
-                current_segment = ""
-                for sentence in sentences:
-                    if not sentence.strip():
-                        continue
-                    
-                    sentence = sentence.strip() + "。"  # 添加句号
-                    
-                    # 如果单个句子就超过最大长度，则按逗号进一步分割
-                    if len(sentence) > max_length:
-                        clauses = re.split(r'[，,]', sentence)
-                        for clause in clauses:
-                            if not clause.strip():
-                                continue
-                            clause = clause.strip()
-                            # 如果子句还是太长，则强制按长度分割
-                            if len(clause) > max_length:
-                                # 强制分割长子句
-                                while len(clause) > max_length:
-                                    segments.append(clause[:max_length])
-                                    clause = clause[max_length:]
-                                if clause:
-                                    segments.append(clause)
-                            else:
-                                segments.append(clause)
-                    else:
-                        # 检查添加当前句子是否会超过最大长度
-                        if len(current_segment) + len(sentence) <= max_length:
-                            current_segment += sentence
-                        else:
-                            # 当前段已满，保存并开始新段
-                            if current_segment:
-                                segments.append(current_segment)
-                            current_segment = sentence
-                
-                # 添加最后一段
-                if current_segment:
-                    segments.append(current_segment)
-                
-                # 逐段播放
-                for i, segment in enumerate(segments):
-                    print(f"[DEBUG] 播放TTS文本段 {i+1}/{len(segments)}: {segment}")
-                    result = self.audio_processor.audio_client.TtsMaker(segment, speaker_id)
-                    if result != 0:
-                        print(f"⚠️  TTS播放返回错误码: {result}")
-                        # 添加短暂延迟再重试一次
-                        time.sleep(0.5)
-                        result = self.audio_processor.audio_client.TtsMaker(segment, speaker_id)
-                        if result != 0:
-                            print(f"⚠️  TTS播放重试失败，错误码: {result}")
-                    # 等待当前段播放完成
-                    wait_time = max(1.0, len(segment) * 0.2)  # 每字符0.2秒
-                    time.sleep(wait_time)
-            else:
-                # 文本长度适中，直接播放
-                result = self.audio_processor.audio_client.TtsMaker(text, speaker_id)
-                if result != 0:
-                    print(f"⚠️  TTS播放返回错误码: {result}")
-                    # 添加短暂延迟再重试一次
-                    time.sleep(0.5)
-                    result = self.audio_processor.audio_client.TtsMaker(text, speaker_id)
-                    if result != 0:
-                        print(f"⚠️  TTS播放重试失败，错误码: {result}")
-                # 等待播放完成
-                wait_time = max(2.0, min(15.0, len(text) * 0.2))  # 每字符0.2秒，最多等待15秒
-                print(f"[DEBUG] TTS文本长度: {len(text)}, 等待时间: {wait_time:.1f}秒")
-                time.sleep(wait_time)
+            # 使用_play_tts_with_wait方法处理TTS播放
+            self._play_tts_with_wait(text, speaker_id)
         except Exception as e:
             print(f"❌ TTS播放失败: {e}")
         finally:
@@ -1550,14 +1670,18 @@ class G1ActionPlayer:
                 # 播放结束预设动作
                 if self.arm_action_client and self.action_map:
                     try:
-                        if action_dir_name == "start_a":
+                        if action_dir_name == "start_a" and start_action_executed:
                             print("💪 播放结束预设动作: right heart")
+                            # 添加3秒延迟再播放结束动作
+                            time.sleep(3)
                             self.arm_action_client.ExecuteAction(self.action_map.get("right heart"))
                             time.sleep(2)
                             # 释放手臂
                             self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
                         elif action_dir_name == "start_x":
                             print("💪 播放结束预设动作: high wave")
+                            # 添加3秒延迟再播放结束动作
+                            time.sleep(4)
                             self.arm_action_client.ExecuteAction(self.action_map.get("high wave"))
                             time.sleep(2)
                             # 释放手臂
@@ -1578,12 +1702,16 @@ class G1ActionPlayer:
                     try:
                         if action_dir_name == "start_a":
                             print("💪 播放结束预设动作: right heart")
+                            # 添加3秒延迟再播放结束动作
+                            time.sleep(3)
                             self.arm_action_client.ExecuteAction(self.action_map.get("right heart"))
                             time.sleep(2)
                             # 释放手臂
                             self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
                         elif action_dir_name == "start_x":
                             print("💪 播放结束预设动作: high wave")
+                            # 添加3秒延迟再播放结束动作
+                            time.sleep(3)
                             self.arm_action_client.ExecuteAction(self.action_map.get("high wave"))
                             time.sleep(2)
                             # 释放手臂
@@ -1637,7 +1765,7 @@ class G1ActionPlayer:
                 # 播放结束预设动作
                 if self.arm_action_client and self.action_map:
                     try:
-                        if action_dir_name == "start_a":
+                        if action_dir_name == "start_a" and start_action_executed:
                             print("💪 播放结束预设动作: right heart")
                             self.arm_action_client.ExecuteAction(self.action_map.get("right heart"))
                             time.sleep(2)
@@ -1645,6 +1773,8 @@ class G1ActionPlayer:
                             self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
                         elif action_dir_name == "start_x":
                             print("💪 播放结束预设动作: high wave")
+                            # 添加3秒延迟再播放结束动作
+                            time.sleep(3)
                             self.arm_action_client.ExecuteAction(self.action_map.get("high wave"))
                             time.sleep(2)
                             # 释放手臂
@@ -1723,6 +1853,8 @@ class G1ActionPlayer:
             # 检查是否被用户中断（L1+F1）
             if self.state == "stopped":
                 print("⏹️ 用户中断播放，停止动作播放")
+                # 确保TTS播放也被停止
+                self.tts_playing = False
             else:
                 # TTS播放完成后停止动作
                 print("⏹️ TTS播放完成，停止动作播放")
@@ -1736,15 +1868,17 @@ class G1ActionPlayer:
             # 播放结束预设动作
             if self.arm_action_client and self.action_map:
                 try:
-                    if action_dir_name == "start_a" and start_action_executed:
-                        print("💪 播放结束预设动作: right heart")
-                        self.arm_action_client.ExecuteAction(self.action_map.get("right heart"))
-                        time.sleep(2)
-                        # 释放手臂
-                        self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
+                    action_name = None
+                    if action_dir_name == "start_a":
+                        action_name = "right heart"
                     elif action_dir_name == "start_x":
-                        print("💪 播放结束预设动作: high wave")
-                        self.arm_action_client.ExecuteAction(self.action_map.get("high wave"))
+                        action_name = "high wave"
+            
+                    if action_name:
+                        print(f"💪 播放结束预设动作: {action_name}")
+                        # 统一添加3秒延迟
+                        time.sleep(3)
+                        self.arm_action_client.ExecuteAction(self.action_map.get(action_name))
                         time.sleep(2)
                         # 释放手臂
                         self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
@@ -1763,15 +1897,12 @@ class G1ActionPlayer:
         except Exception as e:
             print(f"❌ 播放TTS文本和动作时出错: {e}")
         finally:
-            # 确保在所有情况下都释放手臂
-            if self.arm_action_client and self.action_map:
-                try:
-                    self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
-                    print("✅ 手臂已释放")
-                except Exception as e:
-                    print(f"⚠️ 释放手臂时出错: {e}")
+            # 注意：不在这里释放手臂和禁用臂部控制，因为stop_play()已经处理了这些操作
+            # 并且可能正在进行平滑过渡到初始姿态的过程，过早释放会影响平滑性
+            
             # 确保重置TTS播放状态
             self.tts_playing = False
+
     def update_low_frequency(self):
         """
         低频更新函数，用于在功能未激活时减少CPU占用
@@ -1779,14 +1910,13 @@ class G1ActionPlayer:
         # 限制update_low_frequency函数的执行频率
         current_time = time.time()
         
-        # 使用实例属性来存储上次调用时间，避免每次调用都检查hasattr
+        # 使用实例属性来存储上次调用时间
         if not hasattr(self, '_last_low_freq_update_call'):
             self._last_low_freq_update_call = 0
             
-        # 限制update_low_frequency调用频率为200ms一次，显著降低CPU使用率
+        # 限制调用频率为200ms一次，降低CPU占用
         if current_time - self._last_low_freq_update_call < 0.2:
             return
-            
         self._last_low_freq_update_call = current_time
         
         # 如果尚未获取到当前位置反馈，使用零位作为默认位置
@@ -1794,11 +1924,15 @@ class G1ActionPlayer:
             self.current_pose = np.zeros(15, dtype=np.float32)
             return
 
-        # 在停止状态下，只有在功能激活时才发送保持初始姿态的命令，防止干扰遥控器控制
-        if self.state == "stopped" and self.function_activated:
-            # 持续发送初始姿态命令以保持位置，但降低频率
-            hold_pose = self.startup_pose if hasattr(self, 'startup_pose') and self.startup_pose is not None else self.initial_pose
-            self._send_pose(hold_pose, dq=np.zeros(15), kp_scale=0.2, kd_scale=1.0)
+        # 在停止状态下不发送任何控制指令，让遥控器正常工作
+        if self.state == "stopped":
+            return
+            
+        # 在停止状态下不发送任何控制指令，让遥控器正常工作
+        # if self.state == "stopped" and self.function_activated:
+        #     # 持续发送初始姿态命令以保持位置，但降低频率
+        #     hold_pose = self.startup_pose if hasattr(self, 'startup_pose') and self.startup_pose is not None else self.initial_pose
+        #     self._send_pose(hold_pose, dq=np.zeros(15), kp_scale=0.2, kd_scale=1.0)
     def update(self):
         # 限制update函数的执行频率
         current_time = time.time()
@@ -1807,8 +1941,14 @@ class G1ActionPlayer:
         if not hasattr(self, '_last_update_call'):
             self._last_update_call = 0
             
-        # 限制update调用频率为50ms一次，降低频率以减少抖动
-        if current_time - self._last_update_call < 0.05:  # 从0.04增加到0.05（20Hz）
+        # 根据不同状态调整update调用频率
+        # 动作播放期间和回到初始姿态需要更高的频率以确保流畅性
+        if self.state in ["playing", "move_to_initial"]:
+            update_interval = 0.025  # 动作播放和回到初始姿态期间40Hz
+        else:
+            update_interval = 0.05   # 其他状态20Hz
+            
+        if current_time - self._last_update_call < update_interval:
             return
             
         self._last_update_call = current_time
@@ -1885,7 +2025,7 @@ class G1ActionPlayer:
                 self._send_frame(target_frame)
                 
                 # 定期报告播放进度
-                if not hasattr(self, '_last_progress_report') or (t - self._last_progress_report) >= 1.0:
+                if not hasattr(self, '_last_progress_report') or (t - self._last_progress_report) >= 0.5:
                     progress = min(elapsed / total_duration, 1.0) if total_duration > 0 else 0
                     print(f"🎵 播放进度: {progress:.1%} ({elapsed:.1f}/{total_duration:.1f}s)")
                     self._last_progress_report = t
@@ -1895,15 +2035,48 @@ class G1ActionPlayer:
         # 1. ramp_in: 当前 → 第一帧（cosine）
         # -------------------------------
         if self.state == "ramp_in":
-            elapsed = t - self.ramp_start_time
-            ratio = min(elapsed / self.ramp_in_duration, 1.0)
-            # 使用标准平滑步进插值，在响应速度和平滑度之间取得平衡
-            self._send_interpolated_frame(ratio, target_idx=0)
-            if ratio >= 1.0:
+            # 如果还没有生成插值帧序列，则生成它
+            if not hasattr(self, 'ramp_in_frames') or self.ramp_in_frames is None:
+                # 确定起始和目标位置
+                start_q = self.current_pose if self.current_pose is not None else np.zeros(15)
+                target_q = self.action_data[0]
+                
+                # 计算需要的帧数（基于ramp_in_duration和dt）
+                num_frames = max(2, int(self.ramp_in_duration / self.dt))
+                
+                # 生成插值帧序列
+                self.ramp_in_frames = []
+                for i in range(num_frames):
+                    ratio = i / (num_frames - 1)
+                    # 使用平滑步进插值
+                    smooth_ratio = ratio * ratio * (3 - 2 * ratio)
+                    interp_q = (1 - smooth_ratio) * start_q + smooth_ratio * target_q
+                    self.ramp_in_frames.append(interp_q)
+                
+                self.ramp_in_frame_index = 0
+                print(f"📈 生成了 {num_frames} 帧用于ramp_in过渡")
+            
+            # 播放插值帧序列
+            if self.ramp_in_frame_index < len(self.ramp_in_frames):
+                q = self.ramp_in_frames[self.ramp_in_frame_index]
+                # 使用与正常动作播放相同的控制参数
+                progress = self.ramp_in_frame_index / len(self.ramp_in_frames) if len(self.ramp_in_frames) > 0 else 0
+                smooth_factor = progress * progress * (3 - 2 * progress)
+                kp_scale = 0.8 + 0.2 * smooth_factor
+                kd_scale = 0.9 + 0.1 * smooth_factor
+                self._send_pose(q, dq=np.zeros(15), kp_scale=kp_scale, kd_scale=kd_scale)
+                self.ramp_in_frame_index += 1
+            else:
+                # 插值帧播放完成，进入正常播放状态
                 self.state = "playing"
                 # 重置start_time，确保从第一帧开始播放
                 self.start_time = t
                 self.current_frame = 0
+                # 清除插值帧数据
+                if hasattr(self, 'ramp_in_frames'):
+                    delattr(self, 'ramp_in_frames')
+                if hasattr(self, 'ramp_in_frame_index'):
+                    delattr(self, 'ramp_in_frame_index')
                 # 清除ramp阶段的平滑姿态缓存
                 if hasattr(self, 'ramp_smoothed_pose'):
                     delattr(self, 'ramp_smoothed_pose')
@@ -1913,56 +2086,58 @@ class G1ActionPlayer:
         # 3. move_to_initial: 回到初始姿态（程序启动时的姿态）
         # -------------------------------
         if self.state == "move_to_initial":
-            elapsed = t - self.ramp_start_time
-            duration = self.move_to_initial_duration  # 使用实例属性
-            ratio = min(elapsed / duration, 1.0)
-            
-            # 使用更高阶的插值函数提升平滑性
-            smooth_ratio = ratio * ratio * ratio * (10 - 15 * ratio + 6 * ratio * ratio)
-            
-            # 从当前实际位置开始，而不是从动作的最后一帧开始
-            start_q = self.current_pose if self.current_pose is not None else self.action_data[-1]
-            # 回到程序启动时保存的初始姿态
-            target_q = self.startup_pose if hasattr(self, 'startup_pose') and self.startup_pose is not None else self.initial_pose
-            
-            # 进行插值计算
-            interp_q = (1 - smooth_ratio) * start_q + smooth_ratio * target_q
-            
-            # 添加关节速度限制以减少抖动
-            if hasattr(self, '_last_sent_pose') and self._last_sent_pose is not None:
-                # 计算理论上的关节速度
-                dt = 0.04  # 与发送频率匹配
-                theoretical_velocity = (interp_q - self._last_sent_pose) / dt
+            # 如果还没有生成插值帧序列，则生成它
+            if not hasattr(self, 'move_to_initial_frames') or self.move_to_initial_frames is None:
+                # 确定起始和目标位置
+                if hasattr(self, 'transition_start_pose') and self.transition_start_pose is not None:
+                    start_q = self.transition_start_pose
+                else:
+                    start_q = self.current_pose if self.current_pose is not None else self.action_data[-1]
+                    
+                target_q = self.startup_pose if hasattr(self, 'startup_pose') and self.startup_pose is not None else self.initial_pose
                 
-                # 限制关节速度
-                velocity_limited_q = np.zeros_like(interp_q)
-                for i in range(len(interp_q)):
-                    max_vel = self.max_joint_velocity * 0.7  # 回到初始姿态时使用更低的速度限制
-                    actual_vel = theoretical_velocity[i]
-                    if abs(actual_vel) > max_vel:
-                        # 限制速度
-                        velocity_limited_q[i] = self._last_sent_pose[i] + np.sign(actual_vel) * max_vel * dt
-                    else:
-                        velocity_limited_q[i] = interp_q[i]
+                # 计算需要的帧数（基于move_to_initial_duration和dt）
+                num_frames = max(2, int(self.move_to_initial_duration / self.dt))
                 
-                interp_q = velocity_limited_q
+                # 生成插值帧序列
+                self.move_to_initial_frames = []
+                for i in range(num_frames):
+                    ratio = i / (num_frames - 1)
+                    # 使用平滑步进插值
+                    smooth_ratio = ratio * ratio * (3 - 2 * ratio)
+                    interp_q = (1 - smooth_ratio) * start_q + smooth_ratio * target_q
+                    self.move_to_initial_frames.append(interp_q)
+                
+                self.move_to_initial_frame_index = 0
+                print(f"📈 生成了 {num_frames} 帧用于move_to_initial过渡")
             
-            # 保存当前发送的姿态用于下次速度计算
-            self._last_sent_pose = interp_q.copy()
-            
-            # 发送插值位置命令，使用优化的控制参数
-            # 显著增加阻尼系数以提高平滑性
-            self._send_pose(interp_q, dq=np.zeros(15), kp_scale=0.2, kd_scale=1.5)
-
-            # 如果插值完成
-            if ratio >= 1.0:
+            # 播放插值帧序列
+            if self.move_to_initial_frame_index < len(self.move_to_initial_frames):
+                q = self.move_to_initial_frames[self.move_to_initial_frame_index]
+                # 使用与正常动作播放相同的控制参数
+                progress = self.move_to_initial_frame_index / len(self.move_to_initial_frames) if len(self.move_to_initial_frames) > 0 else 0
+                smooth_factor = progress * progress * (3 - 2 * progress)
+                kp_scale = 0.8 + 0.2 * smooth_factor
+                kd_scale = 0.9 + 0.1 * smooth_factor
+                self._send_pose(q, dq=np.zeros(15), kp_scale=kp_scale, kd_scale=kd_scale)
+                self.move_to_initial_frame_index += 1
+            else:
+                # 插值帧播放完成
                 print("🎯 已回到初始姿态")
-                print(f"📍 最终位置: {interp_q[:3]}")
-                # 发送最终位置命令
-                self._send_pose(target_q, dq=np.zeros(15), kp_scale=0.2, kd_scale=1.2)
+                # 发送最终位置命令确保稳定
+                target_q = self.startup_pose if hasattr(self, 'startup_pose') and self.startup_pose is not None else self.initial_pose
+                for _ in range(3):
+                    self._send_pose(target_q, dq=np.zeros(15), kp_scale=1.0, kd_scale=1.0)
+                    time.sleep(0.05)
                 # 设置状态为停止
                 self.state = "stopped"
                 print("✅ 状态已设置为 stopped")
+                
+                # 清除插值帧数据
+                if hasattr(self, 'move_to_initial_frames'):
+                    delattr(self, 'move_to_initial_frames')
+                if hasattr(self, 'move_to_initial_frame_index'):
+                    delattr(self, 'move_to_initial_frame_index')
                 
                 # 播放完成提示音并移除灯光控制（仅在需要时播放）
                 if not hasattr(self, '_no_tts_complete') or not self._no_tts_complete:
@@ -1990,6 +2165,15 @@ class G1ActionPlayer:
                         print("✅ 手臂已释放")
                     except Exception as e:
                         print(f"⚠️ 释放手臂时出错: {e}")
+                
+                # 禁用臂部控制
+                try:
+                    self.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
+                    self.low_cmd.crc = self.crc.Crc(self.low_cmd)
+                    self.publisher.Write(self.low_cmd)
+                    print("✅ 臂部控制已禁用")
+                except Exception as e:
+                    print(f"⚠️ 禁用臂部控制时出错: {e}")
                 
                 # 清空当前动作
                 self.current_action = None
@@ -2576,33 +2760,143 @@ def main(return_remote=False):
                 elif remote.get_combo_once('L1', 'Y'):
                     print("🎮 检测到 L1 + Y，尝试播放Y动作")
                     player.play_action('Y', speed=1.0)  # 慢速播放
-                # Start + Up: 启动 fastlio 导航
-                elif remote.get_combo_once('Start', 'Up'):
-                    print("🚀 检测到 Start + Up，启动 fastlio 导航 (use_rviz:=false)")
-                    try:
-                        player._start_fastlio_navigation()
-                        # 反馈一次TTS（可选）
-                        if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                            player.audio_processor.audio_client.TtsMaker("启动导航", 0)
-                    except Exception as e:
-                        print(f"[fastlio] 触发失败: {e}")
-                # Start + Down: 导航启动≥10秒后触发 mock_dance_trigger.py
-                elif remote.get_combo_once('Start', 'Down'):
-                    if player._can_trigger_after_nav(10.0):
-                        print("🎭 检测到 Start + Down，触发 mock_dance_trigger.py")
+                # Start + L1: 启动 fastlio 导航
+                elif remote.get_combo_once('Start', 'L1'):
+                    if player.function_activated:  # 只有功能激活后才能使用
+                        print("🚀 检测到 Start + L1，启动 fastlio 导航 (use_rviz:=false)")
+                        try:
+                            player._start_fastlio_navigation()
+                            # 反馈一次TTS（可选）
+                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                player.audio_processor.audio_client.TtsMaker("启动导航", 0)
+                        except Exception as e:
+                            print(f"[fastlio] 触发失败: {e}")
+                        
                         try:
                             # 在独立后台进程中运行，避免阻塞
                             subprocess.Popen([
                                 "bash", "-lc",
-                                "python3 /home/unitree/HongTu/PythonProject/point_nav/mock_dance_trigger.py --dance A --delay 0"
+                                "python3 /home/unitree/HongTu/unitree_sdk_python/example/g1/high_level/g1_contrl.py"
                             ])
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                player.audio_processor.audio_client.TtsMaker("开始表演", 0)
+                                player.audio_processor.audio_client.TtsMaker("启动控制程序", 0)
+                        except Exception as e:
+                            print(f"[mock_dance] 启动失败: {e}")
+                    else:
+                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
+
+                # Start + Up: 导航启动≥10秒后触发 simplified_nav_dance.py -a
+                elif remote.get_combo_once('Start', 'Up'):
+                    if player.function_activated:  # 只有功能激活后才能使用
+                        if player._can_trigger_after_nav(10.0):
+                            print("🎭 检测到 Start + Up，触发 simplified_nav_dance.py")
+                            try:
+                                # 在独立后台进程中运行，避免阻塞
+                                subprocess.Popen([
+                                    "bash", "-lc",
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'A'"
+                                ])
+                                if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                    player.audio_processor.audio_client.TtsMaker("开始表演 祖国的好山河 ", 0)
+                            except Exception as e:
+                                print(f"[mock_dance] 启动失败: {e}")
+                        else:
+                            print("[mock_dance] 导航未满10秒，忽略 Start+Up 触发")
+                    else:
+                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
+
+                # Start + Down: 导航启动≥10秒后触发 simplified_nav_dance.py
+                elif remote.get_combo_once('Start', 'Down'):
+                    if player.function_activated:  # 只有功能激活后才能使用
+                        if player._can_trigger_after_nav(10.0):
+                            print("🎭 检测到 Start + Down，触发 mock_dance_trigger.py")
+                            try:
+                                # 在独立后台进程中运行，避免阻塞
+                                subprocess.Popen([
+                                    "bash", "-lc",
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'B'"
+                                ])
+                                if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                    player.audio_processor.audio_client.TtsMaker("开始表演 沙家浜总有一天会解放", 0)
+                            except Exception as e:
+                                print(f"[mock_dance] 启动失败: {e}")
+                        else:
+                            print("[mock_dance] 导航未满10秒，忽略 Start+Down 触发")
+                    else:
+                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
+                        
+                # Start + Right: 导航启动≥10秒后触发 simplified_nav_dance.py
+                elif remote.get_combo_once('Start', 'Right'):
+                    if player.function_activated:  # 只有功能激活后才能使用
+                        if player._can_trigger_after_nav(10.0):
+                            print("🎭 检测到 Start + Right，触发 simplified_nav_dance.py")
+                            try:
+                                # 在独立后台进程中运行，避免阻塞
+                                subprocess.Popen([
+                                    "bash", "-lc",
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'X'"
+                                ])
+                                if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                    player.audio_processor.audio_client.TtsMaker("开始表演 军民鱼水情", 0)
+                            except Exception as e:
+                                print(f"[mock_dance] 启动失败: {e}")
+                        else:
+                            print("[mock_dance] 导航未满10秒，忽略 Start+Right 触发")
+                    else:
+                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
+                        
+                # Start + Left: 导航启动≥10秒后触发 simplified_nav_dance.py
+                elif remote.get_combo_once('Start', 'Left'):
+                    if player.function_activated:  # 只有功能激活后才能使用
+                        if player._can_trigger_after_nav(10.0):
+                            print("🎭 检测到 Start + Left，触发 simplified_nav_dance.py")
+                            try:
+                                # 在独立后台进程中运行，避免阻塞
+                                subprocess.Popen([
+                                    "bash", "-lc",
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'Y'"
+                                ])
+                                if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                    player.audio_processor.audio_client.TtsMaker("开始表演 智斗", 0)
+                            except Exception as e:
+                                print(f"[mock_dance] 启动失败: {e}")
+                        else:
+                            print("[mock_dance] 导航未满10秒，忽略 Start+Left 触发")
+                    else:
+                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
+                # Start + R1: 去上台
+                elif remote.get_combo_once('Start', 'R1'):
+                    if player._can_trigger_after_nav(10.0):
+                        try:
+                            # 在独立后台进程中运行，避免阻塞
+                            subprocess.Popen([
+                                "bash", "-lc",
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'Q'"
+                            ])
+                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                player.audio_processor.audio_client.TtsMaker("上台", 0)
                         except Exception as e:
                             print(f"[mock_dance] 启动失败: {e}")
                     else:
                         print("[mock_dance] 导航未满10秒，忽略 Start+Down 触发")
-                
+                 # Start + R2: 下台
+                elif remote.get_combo_once('Start', 'R2'):
+                    if player._can_trigger_after_nav(10.0):
+                        try:
+                            # 在独立后台进程中运行，避免阻塞
+                            subprocess.Popen([
+                                "bash", "-lc",
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'H'"
+                            ])
+                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                player.audio_processor.audio_client.TtsMaker("下台", 0)
+                        except Exception as e:
+                            print(f"[mock_dance] 启动失败: {e}")
+                    else:
+                        print("[mock_dance] 导航未满10秒，忽略 Start+Down 触发")
+ 
+
+
                 # 处理Start+A/B/X/Y组合键，用于播放预设的TTS文本和对应动作
                 elif remote.get_combo_once('Start', 'A'):
                     print("🔊 检测到 Start + A，播放预设TTS文本A和start_a目录下的动作")
@@ -2612,10 +2906,19 @@ def main(return_remote=False):
                             player._last_tts_a_time = 0
                         current_time = time.time()
                         if current_time - player._last_tts_a_time > 1.0:  # 至少间隔1秒
-                            # 播放预设文本A和动作
-                            player._play_tts_with_action(player.tts_presets['A'], "start_a", 0)
+                            # 在单独线程中播放预设文本A和动作，避免阻塞主循环
+                            import threading
+                            def play_tts_a():
+                                try:
+                                    player._play_tts_with_action(player.tts_presets['A'], "start_a", 0)
+                                    print("✅ TTS文本A和动作播放完成")
+                                except Exception as e:
+                                    print(f"❌ 播放TTS文本A和动作时出错: {e}")
+                            
+                            tts_thread = threading.Thread(target=play_tts_a)
+                            tts_thread.daemon = True
+                            tts_thread.start()
                             player._last_tts_a_time = current_time
-                            print("✅ TTS文本A和动作播放完成")
                     except Exception as e:
                         print(f"❌ 播放TTS文本A和动作时出错: {e}")
                         
@@ -2627,10 +2930,19 @@ def main(return_remote=False):
                             player._last_tts_b_time = 0
                         current_time = time.time()
                         if current_time - player._last_tts_b_time > 1.0:  # 至少间隔1秒
-                            # 播放预设文本B和动作
-                            player._play_tts_with_action(player.tts_presets['B'], "start_b", 0)
+                            # 在单独线程中播放预设文本B和动作，避免阻塞主循环
+                            import threading
+                            def play_tts_b():
+                                try:
+                                    player._play_tts_with_action(player.tts_presets['B'], "start_b", 0)
+                                    print("✅ TTS文本B和动作播放完成")
+                                except Exception as e:
+                                    print(f"❌ 播放TTS文本B和动作时出错: {e}")
+                            
+                            tts_thread = threading.Thread(target=play_tts_b)
+                            tts_thread.daemon = True
+                            tts_thread.start()
                             player._last_tts_b_time = current_time
-                            print("✅ TTS文本B和动作播放完成")
                     except Exception as e:
                         print(f"❌ 播放TTS文本B和动作时出错: {e}")
                         
@@ -2642,10 +2954,19 @@ def main(return_remote=False):
                             player._last_tts_c_time = 0
                         current_time = time.time()
                         if current_time - player._last_tts_c_time > 1.0:  # 至少间隔1秒
-                            # 播放预设文本C和动作
-                            player._play_tts_with_action(player.tts_presets['C'], "start_x", 0)
+                            # 在单独线程中播放预设文本C和动作，避免阻塞主循环
+                            import threading
+                            def play_tts_c():
+                                try:
+                                    player._play_tts_with_action(player.tts_presets['C'], "start_x", 0)
+                                    print("✅ TTS文本C和动作播放完成")
+                                except Exception as e:
+                                    print(f"❌ 播放TTS文本C和动作时出错: {e}")
+                            
+                            tts_thread = threading.Thread(target=play_tts_c)
+                            tts_thread.daemon = True
+                            tts_thread.start()
                             player._last_tts_c_time = current_time
-                            print("✅ TTS文本C和动作播放完成")
                     except Exception as e:
                         print(f"❌ 播放TTS文本C和动作时出错: {e}")
                         
@@ -2657,15 +2978,26 @@ def main(return_remote=False):
                             player._last_tts_d_time = 0
                         current_time = time.time()
                         if current_time - player._last_tts_d_time > 1.0:  # 至少间隔1秒
-                            # 播放预设文本D和动作
-                            player._play_tts_with_action(player.tts_presets['D'], "start_y", 0)
+                            # 在单独线程中播放预设文本D和动作，避免阻塞主循环
+                            import threading
+                            def play_tts_d():
+                                try:
+                                    player._play_tts_with_action(player.tts_presets['D'], "start_y", 0)
+                                    print("✅ TTS文本D和动作播放完成")
+                                except Exception as e:
+                                    print(f"❌ 播放TTS文本D和动作时出错: {e}")
+                            
+                            tts_thread = threading.Thread(target=play_tts_d)
+                            tts_thread.daemon = True
+                            tts_thread.start()
                             player._last_tts_d_time = current_time
-                            print("✅ TTS文本D和动作播放完成")
                     except Exception as e:
                         print(f"❌ 播放TTS文本D和动作时出错: {e}")
                 else:
                     # 在功能激活状态下持续更新player状态，但只在播放动作时才发送控制指令
-                    player.update()
+                    # 只有在非stopped状态下才调用update方法
+                    if player.state != "stopped":
+                        player.update()
                     # 添加小延迟以降低CPU使用率
                     time.sleep(0.05)  # 50ms延迟
             else:
@@ -2676,8 +3008,9 @@ def main(return_remote=False):
                     print("⚠️  功能未激活，正在停止当前动作...")
                     player.stop_play()
                 
-                # 使用低频更新以降低CPU使用率
-                player.update_low_frequency()
+                # 使用低频更新以降低CPU使用率，但在stopped状态下不调用
+                if player.state != "stopped":
+                    player.update_low_frequency()
                 time.sleep(0.1)  # 100ms延迟
         except Exception as e:
             print(f"❌ 回调处理失败: {e}")

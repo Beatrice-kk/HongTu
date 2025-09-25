@@ -41,15 +41,17 @@
  
 <!-- maybe33eeeeeeeeeeeeeeeeeeeeeeeeeeeeee  要看点云参考系  具体调 -->
 
- <param name="min_height" value="-1" />
+ <!-- <param name="min_height" value="-1" /> -->
+ <param name="min_height" value="-0.7" />
+
  <param name="max_height" value="0.15" />
 
  <param name="angle_min" value="-3.1425926" />
  <param name="angle_max" value="3.1415926" />
- <param name="angle_increment" value="0.007" />
+ <param name="angle_increment" value="0.005" />
  <param name="scan_time" value="0.1" />
- <param name="range_min" value="0.2" />
- <param name="range_max" value="100" />
+ <param name="range_min" value="0.1" />
+ <param name="range_max" value="30" />
  <param name="use_inf" value="true" />
  <param name="inf_epsilon" value="1.0" />
  <param name="concurrency_level" value="1" /> 
