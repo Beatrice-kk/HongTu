@@ -309,7 +309,7 @@ class SimpleNavWaypointPlayer:
         dist_error = math.hypot(dx, dy)
         
         # 计算角度误差（最短路径）
-        d_theta = current_theta - target_theta
+        d_theta = target_theta - current_theta  # 修正：目标角度减去当前角度
         while d_theta > 180:
             d_theta -= 360
         while d_theta < -180:
@@ -333,7 +333,7 @@ class SimpleNavWaypointPlayer:
         linear_vel = max(-self.max_linear_vel, min(linear_vel, self.max_linear_vel))
         
         # 角速度控制
-        angular_vel = -self.angle_kp * d_theta  # 负号因为角度误差定义
+        angular_vel = self.angle_kp * d_theta  # 移除负号，因为角度误差计算已修正
         angular_vel = max(-self.max_angular_vel, min(angular_vel, self.max_angular_vel))
         
         # 发布速度命令
@@ -728,7 +728,7 @@ class SimpleNavWaypointPlayer:
 
         # Calculate angular difference - choose shortest path
         current_yaw = self.current_position["theta"]
-        d_yaw = current_yaw - target_yaw
+        d_yaw = target_yaw - current_yaw  # 修正：目标角度减去当前角度
         
         # Normalize to the range [-180, 180] for shortest path
         while d_yaw > 180:

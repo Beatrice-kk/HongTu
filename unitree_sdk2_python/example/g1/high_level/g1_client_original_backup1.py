@@ -2491,6 +2491,63 @@ class G1ActionPlayer:
         except Exception as e:
             print(f"❌ 关闭导航系统失败: {e}")
 
+    def cleanup(self):
+        """清理资源，确保服务正确释放"""
+        try:
+            print("🧹 开始清理G1ActionPlayer资源...")
+            
+            # 停止所有播放
+            self.stop_play(no_tts=True)
+            
+            # 清理发布器
+            if hasattr(self, 'publisher') and self.publisher is not None:
+                try:
+                    # 发送停止命令
+                    if hasattr(self, 'low_cmd') and self.low_cmd is not None:
+                        # 设置所有关节为零力矩模式
+                        for i in range(15):
+                            self.low_cmd.motor_cmd[i].q = 0.0
+                            self.low_cmd.motor_cmd[i].dq = 0.0
+                            self.low_cmd.motor_cmd[i].kp = 0.0
+                            self.low_cmd.motor_cmd[i].kd = 0.0
+                            self.low_cmd.motor_cmd[i].tau = 0.0
+                        self.publisher.Write(self.low_cmd)
+                    self.publisher = None
+                    print("✅ 发布器已清理")
+                except Exception as e:
+                    print(f"⚠️ 清理发布器时出错: {e}")
+            
+            # 重置状态
+            self.state = "stopped"
+            self.current_action = None
+            self.current_pose = None
+            self.tts_playing = False
+            self.audio_playback_active = False
+            
+            # 清理音频相关资源
+            if hasattr(self, 'audio_processor') and self.audio_processor is not None:
+                try:
+                    if hasattr(self.audio_processor, 'cleanup'):
+                        self.audio_processor.cleanup()
+                    print("✅ 音频处理器已清理")
+                except Exception as e:
+                    print(f"⚠️ 清理音频处理器时出错: {e}")
+            
+            # 关闭导航系统
+            self._shutdown_navigation_systems()
+            
+            print("✅ G1ActionPlayer 资源清理完成")
+            
+        except Exception as e:
+            print(f"❌ 清理资源时出错: {e}")
+    
+    def __del__(self):
+        """析构函数，确保资源被清理"""
+        try:
+            self.cleanup()
+        except:
+            pass
+
 
 # -------------------------------
 # 主运控模式检测器（改进版）
@@ -2768,9 +2825,75 @@ def main(return_remote=False):
                     resp.message = str(e)
                 return resp
 
+            def _handle_play_up(_req):
+                resp = TriggerResponse()
+                try:
+                    rospy.loginfo("收到 play_up 请求")
+                    
+                    # 若正在播放，先停止
+                    if player.state != "stopped":
+                        player.stop_play()
+                        wait_t0 = time.time()
+                        while player.state != "stopped" and (time.time()-wait_t0) < 5.0:
+                            time.sleep(0.1)
+                    
+                    # 播放Up模式的TTS和动作
+                    player._play_tts_with_action(player.tts_presets['B'], "start_b", 0)
+                    
+                    # 等待完成（最多120秒）
+                    t0 = time.time()
+                    while player.state != "stopped" and (time.time()-t0) < 120.0:
+                        time.sleep(0.1)
+                    
+                    if player.state == "stopped":
+                        resp.success = True
+                        resp.message = "Up模式完成"
+                    else:
+                        resp.success = False
+                        resp.message = "Up模式超时"
+                except Exception as e:
+                    rospy.logerr(f"处理 play_up 出错: {e}")
+                    resp.success = False
+                    resp.message = str(e)
+                return resp
+
+            def _handle_play_down(_req):
+                resp = TriggerResponse()
+                try:
+                    rospy.loginfo("收到 play_down 请求")
+                    
+                    # 若正在播放，先停止
+                    if player.state != "stopped":
+                        player.stop_play()
+                        wait_t0 = time.time()
+                        while player.state != "stopped" and (time.time()-wait_t0) < 5.0:
+                            time.sleep(0.1)
+                    
+                    # 播放Down模式的TTS和动作
+                    player._play_tts_with_action(player.tts_presets['C'], "start_x", 0)
+                    
+                    # 等待完成（最多120秒）
+                    t0 = time.time()
+                    while player.state != "stopped" and (time.time()-t0) < 120.0:
+                        time.sleep(0.1)
+                    
+                    if player.state == "stopped":
+                        resp.success = True
+                        resp.message = "Down模式完成"
+                    else:
+                        resp.success = False
+                        resp.message = "Down模式超时"
+                except Exception as e:
+                    rospy.logerr(f"处理 play_down 出错: {e}")
+                    resp.success = False
+                    resp.message = str(e)
+                return resp
+
             rospy.Subscriber("dance_direction", RosString, _direction_cb, queue_size=10)
             rospy.Service("play_dance", Trigger, _handle_play_dance)
-            print("✅ ROS 服务已提供: play_dance，订阅: dance_direction")
+            rospy.Service("play_up", Trigger, _handle_play_up)
+            rospy.Service("play_down", Trigger, _handle_play_down)
+            print("✅ ROS 服务已提供: play_dance, play_up, play_down，订阅: dance_direction")
         except Exception as e:
             print(f"⚠️ ROS 初始化失败（忽略）：{e}")
 
@@ -3310,6 +3433,15 @@ def main(return_remote=False):
                 player._last_exit_tts_time = current_time
     except Exception as e:
         print(f"❌ 退出提示失败: {e}")
+
+    # 清理G1ActionPlayer资源
+    try:
+        if player:
+            print("🧹 开始清理G1ActionPlayer资源...")
+            player.cleanup()
+            print("✅ G1ActionPlayer资源清理完成")
+    except Exception as e:
+        print(f"❌ 清理G1ActionPlayer资源失败: {e}")
 
     print("\n👋 程序退出")
     

@@ -526,10 +526,13 @@ class SimpleNavWaypointPlayer:
 
         # Calculate angular difference
         current_yaw = self.current_position["theta"]
-        d_yaw = abs(current_yaw - target_yaw)
-        # Normalize to the range [0, 180]
-        if d_yaw > 180:
-            d_yaw = 360 - d_yaw
+        d_yaw = target_yaw - current_yaw  # 修正：目标角度减去当前角度
+        # 标准化到 [-180, 180] 范围
+        while d_yaw > 180:
+            d_yaw -= 360
+        while d_yaw < -180:
+            d_yaw += 360
+        d_yaw = abs(d_yaw)  # 取绝对值用于阈值比较
 
         # Log information less frequently
         rospy.loginfo_throttle(

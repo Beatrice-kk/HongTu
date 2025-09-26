@@ -187,9 +187,13 @@ class SimpleNavTest:
         dist = math.hypot(dx, dy)
 
         current_yaw = self.current_position["theta"]
-        d_yaw = abs(current_yaw - target_yaw)
-        if d_yaw > 180:
-            d_yaw = 360 - d_yaw
+        d_yaw = target_yaw - current_yaw  # 修正：目标角度减去当前角度
+        # 标准化到 [-180, 180] 范围
+        while d_yaw > 180:
+            d_yaw -= 360
+        while d_yaw < -180:
+            d_yaw += 360
+        d_yaw = abs(d_yaw)  # 取绝对值用于阈值比较
 
         # 检查是否到达目标点
         if dist <= self.threshold and d_yaw <= self.angle_threshold:

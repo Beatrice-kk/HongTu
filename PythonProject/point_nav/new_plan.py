@@ -68,9 +68,7 @@ class SimpleNavWaypointPlayer:
         )
         rospy.loginfo(f"完整路径点序列: {self.waypoints}")
 
-        # 设置宽松的到达阈值，避免过度调整
-        self.threshold = 0.5  # 距离阈值：0.5米内认为到达
-        self.angle_threshold = 30.0  # 角度阈值：30度内认为到达
+        # 到达检测由g1_control.py处理，这里不需要设置阈值
 
         # 使用状态机管理状态
         self._state = NavigationState.IDLE
@@ -115,10 +113,16 @@ class SimpleNavWaypointPlayer:
         # Add cmd_vel publisher to stop the robot
         self.cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
         
-        # Subscribe to cmd_vel to monitor robot movement
+        # 订阅cmd_vel以检测机器人停止
         self.cmd_vel_sub = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback)
-        self.current_velocity = {"linear": 0.0, "angular": 0.0}
-        self.last_velocity_check = rospy.Time.now()
+        
+        # 订阅机器人到达状态话题
+        self.arrival_sub = rospy.Subscriber("/robot_arrival_status", String, self.arrival_callback)
+        
+        # 添加停止检测机制 - 通过检测cmd_vel为0来触发到达
+        self.last_cmd_vel_time = rospy.Time.now()
+        self.cmd_vel_zero_duration = 0.0
+        self.required_stop_time = 2.0  # 需要停止2秒才认为到达
 
         # Dance service client
         rospy.loginfo("Waiting for dance service...")
@@ -126,9 +130,44 @@ class SimpleNavWaypointPlayer:
             rospy.wait_for_service("play_dance", timeout=5.0)
             self.play_dance_service = rospy.ServiceProxy("play_dance", Trigger)
             rospy.loginfo("Dance service connected")
+            
+            # 测试服务是否可用 - 只检查服务是否存在，不实际调用
+            try:
+                # 只检查服务是否可用，不实际调用
+                rospy.loginfo("Dance service is available")
+            except Exception as e:
+                rospy.logwarn(f"Dance service test failed: {e}")
+                # 如果测试失败，重新创建服务代理
+                rospy.sleep(1.0)
+                self.play_dance_service = rospy.ServiceProxy("play_dance", Trigger)
+                rospy.loginfo("Dance service proxy recreated")
+                
         except rospy.ROSException:
             rospy.logwarn("Dance service not available, will not perform dance actions")
             self.play_dance_service = None
+
+        # Up/Down service clients
+        self.play_up_service = None
+        self.play_down_service = None
+        
+        if self.dance_type in ["Up", "Down"]:
+            try:
+                if self.dance_type == "Up":
+                    rospy.loginfo("Waiting for play_up service...")
+                    rospy.wait_for_service("play_up", timeout=5.0)
+                    self.play_up_service = rospy.ServiceProxy("play_up", Trigger)
+                    rospy.loginfo("Play_up service connected")
+                else:  # Down
+                    rospy.loginfo("Waiting for play_down service...")
+                    rospy.wait_for_service("play_down", timeout=5.0)
+                    self.play_down_service = rospy.ServiceProxy("play_down", Trigger)
+                    rospy.loginfo("Play_down service connected")
+            except rospy.ROSException:
+                rospy.logwarn(f"{self.dance_type} service not available")
+                if self.dance_type == "Up":
+                    self.play_up_service = None
+                else:
+                    self.play_down_service = None
 
         # Navigation watchdog timer - reduced checking frequency
         self.nav_watchdog_timer = None
@@ -137,28 +176,42 @@ class SimpleNavWaypointPlayer:
         # Add a timer for dance completion
         self.dance_timer = None
 
-        # 添加一个持续移动的定时器，确保机器人不会停止
-        self.movement_check_timer = rospy.Timer(
-            rospy.Duration(3.0), self.ensure_movement
-        )
-        self._timers.append(self.movement_check_timer)
+      #   # 添加一个持续移动的定时器，确保机器人不会停止
+      #   self.movement_check_timer = rospy.Timer(
+      #       rospy.Duration(3.0), self.ensure_movement
+      #   )
+      #   self._timers.append(self.movement_check_timer)
         
-        # 添加速度检测相关变量
-        self.stopped_timer = None
-        self.stopped_duration = 0.0  # 停止持续时间
-        self.required_stop_time = 0.5  # 需要停止0.5秒才认为完全停止（放宽条件）
-        self.last_velocity_check_time = rospy.Time.now()
+        # 速度检测由g1_control.py处理，这里不需要相关变量
         
         # 添加状态监控定时器
         self.status_timer = rospy.Timer(
             rospy.Duration(10.0), self.log_status_info
         )
         self._timers.append(self.status_timer)
+        
+        # 停止检测现在通过话题通信实现，不需要定时器
+        # self.stop_detection_timer = rospy.Timer(
+        #     rospy.Duration(0.5), self.check_robot_stopped
+        # )
+        # self._timers.append(self.stop_detection_timer)
 
-        rospy.sleep(1.0)
+        # 增加启动延迟，确保所有服务完全初始化
+        rospy.sleep(2.0)
         rospy.loginfo(f"Starting performance, dance type: {self.dance_type}")
         rospy.loginfo(f"总路径点数量: {len(self.waypoints)}")
         rospy.loginfo(f"第一个路径点: {self.waypoints[0] if self.waypoints else 'None'}")
+        
+        # 再次检查舞蹈服务状态 - 只检查服务是否存在，不实际调用
+        if self.play_dance_service is not None:
+            try:
+                rospy.loginfo("Final dance service check...")
+                # 只检查服务是否可用，不实际调用
+                rospy.loginfo("Final dance service is available")
+            except Exception as e:
+                rospy.logwarn(f"Final dance service test failed: {e}")
+                self.play_dance_service = None
+        
         self.start_navigation_watchdog()
         rospy.loginfo("开始导航到第一个路径点...")
         self.navigate_to_current_waypoint()
@@ -203,6 +256,15 @@ class SimpleNavWaypointPlayer:
         except Exception as e:
             rospy.logwarn(f"取消目标失败: {e}")
         
+        # 清理舞蹈服务相关资源
+        try:
+            if hasattr(self, 'play_dance_service') and self.play_dance_service is not None:
+                # 重置舞蹈服务状态
+                self.dance_service_called = False
+                rospy.loginfo("舞蹈服务状态已重置")
+        except Exception as e:
+            rospy.logwarn(f"清理舞蹈服务失败: {e}")
+        
         rospy.loginfo("资源清理完成")
     
     def get_status_info(self):
@@ -228,29 +290,70 @@ class SimpleNavWaypointPlayer:
         """Monitor move_base status"""
         self.move_base_status = msg
     
-    def cmd_vel_callback(self, msg):
-        """Monitor robot velocity to detect when it's stationary"""
-        self.current_velocity["linear"] = math.sqrt(
-            msg.linear.x**2 + msg.linear.y**2 + msg.linear.z**2
-        )
-        self.current_velocity["angular"] = math.sqrt(
-            msg.angular.x**2 + msg.angular.y**2 + msg.angular.z**2
-        )
-        self.last_velocity_check = rospy.Time.now()
-        
-        # 检测是否完全停止
-        current_time = rospy.Time.now()
-        time_diff = (current_time - self.last_velocity_check_time).to_sec()
-        
-        # 如果速度很小，累积停止时间（放宽速度阈值）
-        if (self.current_velocity["linear"] < 0.1 and 
-            self.current_velocity["angular"] < 0.1):
-            self.stopped_duration += time_diff
-        else:
-            # 如果还在移动，重置停止时间
-            self.stopped_duration = 0.0
+    def check_robot_stopped(self, event):
+        """检测机器人是否停止 - 通过监控cmd_vel为0的持续时间"""
+        current_state = self.get_state()
+        if current_state not in [NavigationState.NAVIGATING]:
+            return
             
-        self.last_velocity_check_time = current_time
+        # 检查当前时间与上次cmd_vel的时间差
+        current_time = rospy.Time.now()
+        time_since_last_cmd = (current_time - self.last_cmd_vel_time).to_sec()
+        
+        # 如果超过1秒没有收到cmd_vel，认为机器人已停止
+        if time_since_last_cmd > 1.0:
+            self.cmd_vel_zero_duration += 0.5  # 定时器间隔0.5秒
+            rospy.loginfo(f"机器人停止检测: 停止时间{self.cmd_vel_zero_duration:.1f}秒，需要{self.required_stop_time}秒")
+            
+            # 如果停止时间超过阈值，认为到达目标
+            if self.cmd_vel_zero_duration >= self.required_stop_time:
+                rospy.loginfo(f"检测到机器人已停止{self.cmd_vel_zero_duration:.1f}秒，认为到达目标")
+                self._handle_waypoint_arrival()
+                self.cmd_vel_zero_duration = 0.0  # 重置
+        else:
+            # 如果还在接收cmd_vel，重置停止时间
+            self.cmd_vel_zero_duration = 0.0
+    
+    def _handle_waypoint_arrival(self):
+        """处理到达航点的逻辑"""
+        current_state = self.get_state()
+        if current_state != NavigationState.NAVIGATING:
+            rospy.logwarn(f"当前状态不是NAVIGATING，无法处理到达: {current_state}")
+            return
+            
+        rospy.loginfo(f"到达路径点 {self.current_waypoint_index+1}")
+        rospy.loginfo(f"当前航点索引: {self.current_waypoint_index}, 舞蹈服务已调用: {self.dance_service_called}")
+        
+        # 对于第一个点，需要开始舞蹈
+        if self.current_waypoint_index == 0 and not self.dance_service_called:
+            rospy.loginfo("到达第一个点，开始执行舞蹈")
+            self.set_state(NavigationState.WAITING)
+            self.perform_dance()
+        else:
+            # 其他点或舞蹈已调用，直接按等待时间停留
+            rospy.loginfo("按等待时间停留")
+            self.set_state(NavigationState.WAITING)
+            self.schedule_next_waypoint()
+    
+    def arrival_callback(self, msg):
+        """接收机器人到达状态"""
+        current_state = self.get_state()
+        if current_state != NavigationState.NAVIGATING:
+            return
+            
+        if msg.data == "arrived":
+            rospy.loginfo("收到机器人到达状态，开始处理航点到达逻辑")
+            self._handle_waypoint_arrival()
+    
+    def cmd_vel_callback(self, msg):
+        """监控cmd_vel以检测机器人停止"""
+        # 更新最后接收cmd_vel的时间
+        self.last_cmd_vel_time = rospy.Time.now()
+        
+        # 如果cmd_vel不为0，重置停止时间
+        if not (msg.linear.x == 0.0 and msg.linear.y == 0.0 and msg.linear.z == 0.0 and
+                msg.angular.x == 0.0 and msg.angular.y == 0.0 and msg.angular.z == 0.0):
+            self.cmd_vel_zero_duration = 0.0
     
 
     def start_navigation_watchdog(self):
@@ -262,22 +365,42 @@ class SimpleNavWaypointPlayer:
         )  # 增加检查间隔
         self._timers.append(self.nav_watchdog_timer)
 
-    def ensure_movement(self, event):
-        """简化的移动检查 - 减少干预，让底层控制器处理"""
-        current_state = self.get_state()
-        if current_state in [NavigationState.DANCING, NavigationState.COMPLETED]:
-            return
+   #  def ensure_movement(self, event):
+   #      """检查导航进度，只在真正卡住时才干预"""
+   #      current_state = self.get_state()
+   #      if current_state in [NavigationState.DANCING, NavigationState.COMPLETED, NavigationState.WAITING]:
+   #          return
 
-        # 简化的超时检查 - 只在导航状态且停留超过20秒时才干预
-        if (current_state == NavigationState.NAVIGATING and 
-            self.waypoint_start_time and 
-            (rospy.Time.now() - self.waypoint_start_time).to_sec() > 20.0):
-            rospy.logwarn(f"在路径点{self.current_waypoint_index+1}停留超过20秒，强制前进")
-            self.force_move_to_next_waypoint()
+   #      # 只在导航状态且发布航点后超过30秒时才检查（给足够时间到达）
+   #      if (current_state == NavigationState.NAVIGATING and 
+   #          self.waypoint_start_time and 
+   #          (rospy.Time.now() - self.waypoint_start_time).to_sec() > 30.0):
+            
+   #          # 检查是否是最后一个航点
+   #          is_last_waypoint = (self.current_waypoint_index == len(self.waypoints) - 1)
+            
+   #          if is_last_waypoint:
+   #              rospy.logwarn(f"在最后一个路径点导航超过30秒，继续尝试...")
+   #              # 重新发布最后一个航点目标
+   #              rospy.loginfo("重新发布最后一个航点目标...")
+   #              self.navigate_to_current_waypoint(is_retry=True)
+   #          else:
+   #              rospy.logwarn(f"在路径点{self.current_waypoint_index+1}导航超过30秒，强制前进")
+   #              self.force_move_to_next_waypoint()
 
     def force_move_to_next_waypoint(self):
-        """强制移动到下一个路径点，不考虑当前点是否到达"""
+        """强制移动到下一个路径点，不考虑当前点是否到达（除了最后一个点）"""
         with self._lock:
+            # 检查是否是最后一个航点
+            is_last_waypoint = (self.current_waypoint_index == len(self.waypoints) - 1)
+            
+            if is_last_waypoint:
+                rospy.logwarn("这是最后一个航点，不允许跳过，继续尝试...")
+                # 重新发布最后一个航点目标
+                rospy.loginfo("重新发布最后一个航点目标...")
+                self.navigate_to_current_waypoint(is_retry=True)
+                return
+            
             # 取消当前目标
             cancel_msg = GoalID()
             self.cancel_pub.publish(cancel_msg)
@@ -307,23 +430,29 @@ class SimpleNavWaypointPlayer:
 
 
     def check_navigation_progress(self, event):
-        """简化的导航进度检查"""
+        """检查导航进度，只在真正卡住时才干预"""
         current_state = self.get_state()
         if current_state not in [NavigationState.NAVIGATING]:
             return
 
-        # 简化的卡住检测 - 只检查时间，让底层控制器处理移动
-        current_time = rospy.Time.now()
-        time_diff = (current_time - self.last_position_check["time"]).to_sec()
-
-        # 更新检查时间
-        self.last_position_check["time"] = current_time
-
-        # 如果在一个点停留太久，强制前进到下一个点
-        if time_diff > 15.0:  # 15秒后强制前进
-            rospy.logwarn(f"[超时] 在路径点停留超过{time_diff:.1f}秒，强制前进...")
-            self.force_move_to_next_waypoint()
-            return
+        # 检查从发布航点开始的总时间
+        if self.waypoint_start_time:
+            total_time = (rospy.Time.now() - self.waypoint_start_time).to_sec()
+            
+            # 如果发布航点后超过45秒还没到达，认为卡住了
+            if total_time > 45.0:
+                # 检查是否是最后一个航点
+                is_last_waypoint = (self.current_waypoint_index == len(self.waypoints) - 1)
+                
+                if is_last_waypoint:
+                    rospy.logwarn(f"[超时] 在最后一个路径点导航超过{total_time:.1f}秒，继续尝试...")
+                    # 重新发布最后一个航点目标
+                    rospy.loginfo("重新发布最后一个航点目标...")
+                    self.navigate_to_current_waypoint(is_retry=True)
+                else:
+                    rospy.logwarn(f"[超时] 在路径点导航超过{total_time:.1f}秒，强制前进...")
+                    self.force_move_to_next_waypoint()
+                return
 
 
     def _build_move_base_goal(self, x, y, theta_deg):
@@ -416,7 +545,7 @@ class SimpleNavWaypointPlayer:
             self._timers.append(self.plan_failure_timer)
 
     def check_plan_failure(self, event):
-        """检查路径规划是否失败，如果失败则跳过当前点"""
+        """检查路径规划是否失败，如果失败则跳过当前点（除了最后一个点）"""
         current_state = self.get_state()
         if current_state == NavigationState.NAVIGATING:
             # 检查机器人是否在移动
@@ -430,8 +559,17 @@ class SimpleNavWaypointPlayer:
                 dist_moved = math.hypot(dx, dy)
                 
                 if dist_moved < 0.1:  # 如果几乎没有移动
-                    rospy.logwarn(f"[路径规划失败] 机器人5秒内只移动了{dist_moved:.3f}米，跳过当前点")
-                    self.force_move_to_next_waypoint()
+                    # 检查是否是最后一个航点（后台点）
+                    is_last_waypoint = (self.current_waypoint_index == len(self.waypoints) - 1)
+                    
+                    if is_last_waypoint:
+                        rospy.logwarn(f"[路径规划失败] 机器人5秒内只移动了{dist_moved:.3f}米，但这是最后一个航点，继续尝试...")
+                        # 对于最后一个点，重新发布目标而不是跳过
+                        rospy.loginfo("重新发布最后一个航点目标...")
+                        self.navigate_to_current_waypoint(is_retry=True)
+                    else:
+                        rospy.logwarn(f"[路径规划失败] 机器人5秒内只移动了{dist_moved:.3f}米，跳过当前点")
+                        self.force_move_to_next_waypoint()
 
     def perform_dance(self):
         """
@@ -439,11 +577,6 @@ class SimpleNavWaypointPlayer:
         """
         if self.dance_service_called:
             rospy.loginfo("舞蹈服务已被调用，不再重复调用")
-            return
-
-        if self.play_dance_service is None:
-            rospy.logwarn("舞蹈服务不可用，跳过舞蹈")
-            self.force_move_to_next_waypoint()
             return
 
         try:
@@ -454,25 +587,72 @@ class SimpleNavWaypointPlayer:
             rospy.sleep(0.5)  # 等待停止命令生效
             
             self.set_state(NavigationState.DANCING)
-            dance_direction = self.dance_type
-            rospy.loginfo(
-                f"开始舞蹈: {dance_direction}，在此表演中只会调用一次舞蹈服务"
-            )
-            self.dance_direction_pub.publish(String(dance_direction))
-            rospy.sleep(0.5)
+            
+            # 检查是否是Up或Down模式，使用服务调用
+            if self.dance_type in ["Up", "Down"]:
+                rospy.loginfo(f"开始{self.dance_type}模式TTS和动作播放")
+                
+                # 检查对应的服务是否可用
+                if self.dance_type == "Up" and self.play_up_service is None:
+                    rospy.logwarn("Up服务不可用，跳过Up模式")
+                    self.force_move_to_next_waypoint()
+                    return
+                elif self.dance_type == "Down" and self.play_down_service is None:
+                    rospy.logwarn("Down服务不可用，跳过Down模式")
+                    self.force_move_to_next_waypoint()
+                    return
+                
+                # 在单独线程中调用对应的服务
+                def call_up_down_service():
+                    try:
+                        if self.dance_type == "Up":
+                            response = self.play_up_service()
+                        else:  # Down
+                            response = self.play_down_service()
+                        
+                        if response.success:
+                            rospy.loginfo(f"{self.dance_type}模式服务调用成功: {response.message}")
+                        else:
+                            rospy.logwarn(f"{self.dance_type}模式服务调用失败: {response.message}")
+                    except Exception as e:
+                        rospy.logerr(f"调用{self.dance_type}模式服务失败: {e}")
+                    finally:
+                        # 服务调用完成后，设置定时器等待
+                        rospy.loginfo(f"{self.dance_type}模式服务调用完成，开始等待时间")
+                        self.schedule_next_waypoint()
+                
+                service_thread = threading.Thread(target=call_up_down_service)
+                service_thread.daemon = True
+                service_thread.start()
+                self._threads.append(service_thread)
+            else:
+                # 原有的舞蹈服务逻辑
+                if self.play_dance_service is None:
+                    rospy.logwarn("舞蹈服务不可用，跳过舞蹈")
+                    self.force_move_to_next_waypoint()
+                    return
 
-            # 在真正的非阻塞方式中调用服务
-            dance_thread = threading.Thread(target=self._call_dance_service)
-            dance_thread.daemon = True
-            dance_thread.start()
-            self._threads.append(dance_thread)
+                dance_direction = self.dance_type
+                rospy.loginfo(
+                    f"开始舞蹈: {dance_direction}，在此表演中只会调用一次舞蹈服务"
+                )
+                self.dance_direction_pub.publish(String(dance_direction))
+                rospy.sleep(0.5)
+
+                # 在真正的非阻塞方式中调用服务
+                dance_thread = threading.Thread(target=self._call_dance_service)
+                dance_thread.daemon = True
+                dance_thread.start()
+                self._threads.append(dance_thread)
 
             # 标记舞蹈服务已调用
             self.dance_service_called = True
             rospy.loginfo("舞蹈服务调用已启动，等待完成后将继续导航")
 
-            # 设置一个定时器，确保即使舞蹈服务卡住也能继续
-            self.schedule_next_waypoint()
+            # 对于非Up/Down模式，设置定时器等待
+            if self.dance_type not in ["Up", "Down"]:
+                # 设置一个定时器，确保即使舞蹈服务卡住也能继续
+                self.schedule_next_waypoint()
 
         except Exception as e:
             rospy.logerr(f"舞蹈服务调用失败: {e}")
@@ -546,12 +726,12 @@ class SimpleNavWaypointPlayer:
                 sys.exit(0)
 
     def feedback_callback(self, msg):
-        """Handle navigation feedback, detect arrival with very loose thresholds"""
+        """Handle navigation feedback - 到达检测由g1_control.py处理"""
         current_state = self.get_state()
         if self.reached_final or current_state in [NavigationState.DANCING, NavigationState.COMPLETED]:
             return
 
-        # Update current position
+        # Update current position for logging only
         current_pose = msg.feedback.base_position.pose
         self.current_position["x"] = current_pose.position.x
         self.current_position["y"] = current_pose.position.y
@@ -561,62 +741,11 @@ class SimpleNavWaypointPlayer:
         euler = tft.euler_from_quaternion(quaternion)
         self.current_position["theta"] = math.degrees(euler[2])
 
-        # Get current waypoint
-        x, y, target_yaw = self.waypoints[self.current_waypoint_index]
-
-        # Calculate distance to target
-        dx = current_pose.position.x - x
-        dy = current_pose.position.y - y
-        dist = math.hypot(dx, dy)
-
-        # Calculate angular difference - choose shortest path
-        current_yaw = self.current_position["theta"]
-        d_yaw = current_yaw - target_yaw
-        
-        # Normalize to the range [-180, 180] for shortest path
-        while d_yaw > 180:
-            d_yaw -= 360
-        while d_yaw < -180:
-            d_yaw += 360
-            
-        # Use absolute value for threshold comparison
-        d_yaw_abs = abs(d_yaw)
-
-        # 持续打印当前位姿信息
-        rospy.loginfo(f"[当前位姿] x={current_pose.position.x:.3f}, y={current_pose.position.y:.3f}, yaw={current_yaw:.2f}°")
-        
-        # Log information less frequently
+        # 只记录位置信息，不进行到达检测
         rospy.loginfo_throttle(
             5,
-            f"[导航状态] 距离目标: {dist:.2f} 米, 角度差: {d_yaw:.2f} 度 (最短路径)",
+            f"[当前位置] ({current_pose.position.x:.2f}, {current_pose.position.y:.2f})",
         )
-
-        # 检查是否到达目标点（距离和角度都要满足）
-        if (dist <= self.threshold and d_yaw_abs <= self.angle_threshold and current_state == NavigationState.NAVIGATING):
-            rospy.loginfo(f"到达路径点 {self.current_waypoint_index+1} (距离:{dist:.2f}m, 角度差:{d_yaw:.2f}度)")
-            rospy.loginfo(f"当前速度: 线速度={self.current_velocity['linear']:.3f}, 角速度={self.current_velocity['angular']:.3f}")
-            rospy.loginfo(f"停止持续时间: {self.stopped_duration:.1f}秒")
-            
-            # 对于第一个点，需要基本停止后才开始舞蹈（放宽条件）
-            if self.current_waypoint_index == 0 and not self.dance_service_called:
-                # 检查是否基本停止（放宽速度阈值和停止时间要求）
-                if (self.current_velocity["linear"] < 0.1 and 
-                    self.current_velocity["angular"] < 0.1 and 
-                    self.stopped_duration >= self.required_stop_time):
-                    rospy.loginfo("机器人已基本停止，开始执行舞蹈")
-                    self.set_state(NavigationState.WAITING)
-                    self.perform_dance()
-                else:
-                    rospy.loginfo(f"等待机器人基本停止... (当前停止时间: {self.stopped_duration:.1f}s, 需要: {self.required_stop_time}s)")
-                    # 不改变状态，继续等待
-            else:
-                # 其他点或舞蹈已调用，直接按等待时间停留
-                rospy.loginfo(f"不在第一个点或舞蹈已调用，按等待时间停留")
-                self.set_state(NavigationState.WAITING)
-                self.schedule_next_waypoint()
-        elif (dist <= self.threshold and current_state == NavigationState.NAVIGATING):
-            # 距离到达但角度未到达，继续等待
-            rospy.loginfo(f"距离已到达 (距离:{dist:.2f}m)，但角度未到达 (角度差:{d_yaw:.2f}度, 需要:{self.angle_threshold}度)")
 
 
 if __name__ == "__main__":
@@ -638,9 +767,9 @@ if __name__ == "__main__":
     dance_choreography = {
        #祖国的好山河
         "A": [
-            ((-2.3, 3.4, 170), 30.0),
-            ((-2.4, 3.4, 180), 40.0),
-            ((-2.6, 3.4, -170), 20.0),
+            ((-2.2, 3.0, 170), 30.0),
+            ((-2.6, 3.4, 180), 40.0),
+            ((-3.0, 3.4, -170), 20.0),
             ((-0.6, 0, 0), 0),
         ],
         #沙家浜总有一天
@@ -656,7 +785,7 @@ if __name__ == "__main__":
             ((-2.4, 2.6, 172), 60.0),
             ((-2.7, 3.2, 160), 50.0),
             ((-2.7, 3.5, 160), 63.5),
-            ((-3.1, 3.4, 170), 60.5),
+            ((-3.1, 3.4, 180), 60.5),
             ((-0.6, 0, 0), 0),
         ],
         #智斗
@@ -679,43 +808,12 @@ if __name__ == "__main__":
             ((-0.6, 0, 0), 0),
         ],
     }
-    # 检查是否是Up或Down参数，如果是则直接调用_play_tts_with_action
-    if args.dance in ["Up", "Down"]:
-        rospy.loginfo(f"检测到{args.dance}参数，直接调用TTS和动作播放")
-        
-        # 初始化G1ActionPlayer
-        try:
-            action_player = G1ActionPlayer()
-            
-            # 根据参数选择对应的TTS文本和动作目录
-            if args.dance == "Up":
-                tts_text = action_player.tts_presets.get('B', "各位朋友，大家好。在江南水乡沙家浜，曾镌刻下一段军民同心、共抗敌寇的红色记忆。这里有指导员郭建光的壮志凌云，有阿庆嫂的机智沉着，有沙奶奶的慈爱坚毅，也有与敌人周旋的惊心动魄。接下来，让我们循着京剧《沙家浜》的经典旋律，一同穿越烽火岁月，重温那段充满斗争智慧与深厚情谊的历史！")
-                action_dir = "start_b"
-            else:  # Down
-                tts_text = action_player.tts_presets.get('C', "各位朋友，经典的唱腔余韵悠长，烽火里的故事依旧动人。我们刚刚一同重温了郭建光的壮志、沙奶奶的坚韧，也深深记住了阿庆嫂垒起七星灶的过人智慧，更读懂了那份跨越岁月的军民鱼水情。本场沙家浜京剧选段演出到此圆满结束，感谢您的驻足与陪伴，我们下次再会！")
-                action_dir = "start_x"
-            
-            # 调用_play_tts_with_action函数
-            action_player._play_tts_with_action(tts_text, action_dir, 0)
-            
-            rospy.loginfo(f"TTS和动作播放完成: {args.dance}")
-            rospy.loginfo("任务完成，程序即将退出")
-            
-        except Exception as e:
-            rospy.logerr(f"调用_play_tts_with_action失败: {e}")
-            rospy.loginfo("任务失败，程序即将退出")
-        finally:
-            # 确保程序退出
-            rospy.signal_shutdown("任务完成")
-            import sys
-            sys.exit(0)
-    else:
-        # 原有的导航舞蹈逻辑
-        node = SimpleNavWaypointPlayer(
-            backstage_pos=backstage_pos,
-            dance_type=args.dance,
-            dance_choreography=dance_choreography,
-        )
+    # 所有模式都使用导航舞蹈逻辑，包括Up和Down
+    node = SimpleNavWaypointPlayer(
+        backstage_pos=backstage_pos,
+        dance_type=args.dance,
+        dance_choreography=dance_choreography,
+    )
 
-        rospy.loginfo(f"表演开始，使用舞蹈类型: {args.dance}")
-        rospy.spin()
+    rospy.loginfo(f"表演开始，使用舞蹈类型: {args.dance}")
+    rospy.spin()
