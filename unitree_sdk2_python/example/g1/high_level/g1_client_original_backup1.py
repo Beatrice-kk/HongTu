@@ -1425,18 +1425,16 @@ class G1ActionPlayer:
             # 而是让update方法中的move_to_initial状态处理逻辑继续执行直到完成
             print("🔄 已在回到初始姿态过程中，等待平滑过渡完成")
             pass
-        elif self.state == "move_to_initial":
-            # 如果已经在回到初始姿态的过程中，直接完成
-            # 主动释放手臂
-            if self.arm_action_client and self.action_map:
-                try:
-                    self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
-                    print("✅ 手臂已释放")
-                except Exception as e:
-                    print(f"⚠️ 释放手臂时出错: {e}")
-            
-            self.state = "stopped"
-            print("✅ 状态已设置为 stopped")
+        else:
+            # 如果当前状态已经是stopped或其他状态，确保臂部控制被禁用
+            try:
+                self.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
+                self.low_cmd.crc = self.crc.Crc(self.low_cmd)
+                if self.publisher is not None:
+                    self.publisher.Write(self.low_cmd)
+                print("✅ 确保臂部控制已禁用")
+            except Exception as e:
+                print(f"⚠️ 禁用臂部控制时出错: {e}")
 
     def _init_audio_sync(self):
         """初始化音频同步相关属性"""
@@ -1933,6 +1931,14 @@ class G1ActionPlayer:
 
         # 在停止状态下不发送任何控制指令，让遥控器正常工作
         if self.state == "stopped":
+            # 确保臂部控制被禁用，以便遥控器可以控制
+            try:
+                self.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
+                self.low_cmd.crc = self.crc.Crc(self.low_cmd)
+                if self.publisher is not None:
+                    self.publisher.Write(self.low_cmd)
+            except Exception as e:
+                print(f"⚠️ 禁用臂部控制时出错: {e}")
             return
             
         # 在停止状态下不发送任何控制指令，让遥控器正常工作
@@ -2177,7 +2183,8 @@ class G1ActionPlayer:
                 try:
                     self.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
                     self.low_cmd.crc = self.crc.Crc(self.low_cmd)
-                    self.publisher.Write(self.low_cmd)
+                    if self.publisher is not None:
+                        self.publisher.Write(self.low_cmd)
                     print("✅ 臂部控制已禁用")
                 except Exception as e:
                     print(f"⚠️ 禁用臂部控制时出错: {e}")
@@ -3191,6 +3198,15 @@ def main(return_remote=False):
                     time.sleep(0.05)  # 50ms延迟
             else:
                 # 功能未激活时，让机器人可以正常响应遥控器控制
+                # 确保臂部控制被禁用，以便遥控器可以控制
+                try:
+                    player.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
+                    player.low_cmd.crc = player.crc.Crc(player.low_cmd)
+                    if player.publisher is not None:
+                        player.publisher.Write(player.low_cmd)
+                except Exception as e:
+                    print(f"⚠️ 禁用臂部控制时出错: {e}")
+                
                 # 不再主动发送停止命令或回到零位命令
                 # 只有在动作播放时才停止
                 if player.state not in ["stopped", "move_to_initial"]:

@@ -3,8 +3,8 @@
      <!-- 启动运控 -->
     <!-- <node pkg="fastlio" type="g1_ctrl_cwk.py" name="g1_ctrl_cwk" cwd="node" output="screen"/> -->
     <!-- <node pkg="fastlio" type="g1_ctrl_rotate.py" name="g1_ctrl_rotate" cwd="node" output="screen"/> -->
-    <!-- <node pkg="fastlio" type="g1_control.py" name="g1_control" cwd="node" output="screen"/> -->
-    <node pkg="fastlio" type="g1_control.py" name="unitree_cmd_vel_controller" cwd="node" output="screen"/>
+    <node pkg="fastlio" type="g1_control_back.py" name="unitree_cmd_vel_controller" cwd="node" output="screen"/>
+    <!-- <node pkg="fastlio" type="g1_control.py" name="unitree_cmd_vel_controller" cwd="node" output="screen"/> -->
 
     
     <node pkg="tf" type="static_transform_publisher" name="base_to_body" args="0.0 0 0.0 3.1416 3.1416 0 /body /base_link 1" />

@@ -23,9 +23,9 @@ class CmdVelController:
         self.target_pose = None   # 目标位置
         self.has_target = False   # 是否有目标位置
         
-        # 偏差阈值设置
-        self.distance_threshold = 0.4  # 距离阈值 0.3米
-        self.angle_threshold = math.radians(30)  # 角度阈值 20度
+        # 偏差阈值设置 - 更宽松的阈值，减少精确调整
+        self.distance_threshold = 0.6  # 距离阈值 0.8米（更宽松）
+        self.angle_threshold = math.radians(60)  # 角度阈值 60度（更宽松）
         
         # 订阅 /cmd_vel
         rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback)
@@ -79,7 +79,7 @@ class CmdVelController:
         return abs(angle_diff)
     
     def is_at_target(self):
-        """检查是否到达目标位置"""
+        """检查是否到达目标位置 - 更宽松的到达判断"""
         if not self.has_target or self.current_pose is None or self.target_pose is None:
             return False
             
@@ -88,14 +88,28 @@ class CmdVelController:
         
         rospy.logdebug(f"Distance to target: {distance:.2f}m, Angle diff: {math.degrees(angle_diff):.1f}°")
         
-        return distance <= self.distance_threshold and angle_diff <= self.angle_threshold
+        # 到达条件：距离和角度都要满足
+        return distance <= self.distance_threshold and angle_diff <= self.angle_threshold 
 
     def cmd_vel_callback(self, msg: Twist):
         vx = msg.linear.x      # 前后移动
         vy = msg.linear.y      # 横向移动
         wz = msg.angular.z     # 旋转
 
-        # 检查是否到达目标位置
+        # 检查遥控器命令强度 - 如果遥控器命令足够强，优先处理遥控器
+        cmd_strength = abs(vx) + abs(vy) + abs(wz)
+        
+        # 如果遥控器命令强度大于0.1，优先处理遥控器命令，忽略到达检测
+        if cmd_strength > 0.1:
+            rospy.loginfo(f"[遥控器优先] 检测到遥控器命令，强度: {cmd_strength:.2f}")
+            try:
+                # 发送运动指令
+                self.sport_client.Move(vx, vy, wz)
+            except Exception as e:
+                rospy.logerr(f"Failed to send Move command: {e}")
+            return
+
+        # 检查是否到达目标位置（仅在无遥控器命令时）
         if self.is_at_target():
             rospy.loginfo("Robot has reached target position. Stopping.")
             try:

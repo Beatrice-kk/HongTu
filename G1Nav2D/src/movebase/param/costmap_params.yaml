@@ -63,7 +63,7 @@ global_costmap:
         inflation_option: 3
 
     inflation_layer:
-        inflation_radius: 0.15
+        inflation_radius: 0.18
         cost_scaling_factor: 3.0
 
 local_costmap:
@@ -133,5 +133,5 @@ local_costmap:
         inflation_option: 3
 
     inflation_layer:
-        inflation_radius: 0.12
+        inflation_radius: 0.16
         cost_scaling_factor: 2.0

@@ -17,8 +17,8 @@ controller_max_retries: 1
 recovery_enabled: true
 recovery_patience: 30.0
 
-oscillation_timeout: 10.0
-oscillation_distance: 0.2
+oscillation_timeout: 30.0
+oscillation_distance: 0.5
 
 force_stop_at_goal: true
 controller_lock_costmap: false

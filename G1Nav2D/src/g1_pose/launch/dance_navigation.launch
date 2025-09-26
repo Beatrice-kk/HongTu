@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- 舞蹈导航启动文件 -->
+  <!-- Dance Navigation Launch File -->
+  
+  <!-- 参数配置 -->
+  <arg name="dance_type" default="A" doc="舞蹈类型: A, B, X, Y, Up, Down"/>
+  <arg name="config_file" default="$(find g1_pose)/config/dance_config.yaml" doc="配置文件路径"/>
+  <arg name="debug" default="false" doc="是否启用调试模式"/>
+  
+  <!-- 加载配置文件 -->
+  <rosparam file="$(arg config_file)" command="load" ns="dance_navigation"/>
+  
+  <!-- 设置参数 -->
+  <param name="dance_navigation/dance_type" value="$(arg dance_type)"/>
+  <param name="dance_navigation/debug" value="$(arg debug)"/>
+  
+  <!-- 启动舞蹈导航节点 -->
+  <node name="dance_navigation" pkg="g1_pose" type="dance_navigation_node.py" output="screen">
+    <param name="dance_type" value="$(arg dance_type)"/>
+    <param name="config_file" value="$(arg config_file)"/>
+    <param name="debug" value="$(arg debug)"/>
+  </node>
+
+</launch>

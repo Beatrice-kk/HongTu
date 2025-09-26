@@ -14,6 +14,7 @@ import math
 import glob
 import threading
 import subprocess
+import shutil
 from datetime import datetime
 
 # 导入必要的SDK模块
@@ -973,26 +974,71 @@ class G1ActionPlayer:
                     self._send_pose(interpolated_pose)
     
     def _start_fastlio_navigation(self):
-        """启动fastlio导航"""
+        """
+        启动 fastlio 导航: roslaunch fastlio navigation use_rviz:=false
+        - 优先在可用终端中打开并打印输出
+        - 若无图形终端可用，则在后台运行并输出到日志文件
+        - 避免重复启动
+        """
         try:
-            # 检查是否已经启动过
+            # 若已有运行中的进程，避免重复启动
             if self._fastlio_proc is not None and self._fastlio_proc.poll() is None:
-                print("??  fastlio导航已经在运行中")
+                print("[fastlio] 已在运行，跳过重复启动")
                 return
-                
-            # 启动fastlio导航
-            cmd = [
-                "bash", "-lc",
-                "cd /home/unitree/HongTu/G1Nav2D && source /opt/ros/noetic/setup.bash && "
-                "roslaunch fastlio2 gridmap_load.launch use_rviz:=false"
-            ]
-            
-            self._fastlio_proc = subprocess.Popen(cmd)
-            self._fastlio_started_at = time.time()
-            print("? fastlio导航启动成功")
-            
+
+            # 准备日志目录与文件
+            log_dir = "/home/unitree/HongTu/PythonProject/point_nav/logs"
+            os.makedirs(log_dir, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = os.path.join(log_dir, f"fastlio_{ts}.log")
+
+            launch_cmd = "roslaunch fastlio navigation.launch use_rviz:=false"
+
+            # 根据可用终端选择启动方式
+            term = shutil.which("gnome-terminal")
+            xterm = shutil.which("xterm")
+            display_ok = bool(os.environ.get("DISPLAY"))
+
+            if display_ok and term:
+                # 在 gnome-terminal 中启动，并将输出 tee 到日志，同时保留终端
+                cmd = [
+                    term,
+                    "--",
+                    "bash",
+                    "-lc",
+                    f"{launch_cmd} 2>&1 | tee -a '{log_file}'; exec bash"
+                ]
+                print(f"[fastlio] 使用 gnome-terminal 启动，日志: {log_file}")
+                self._fastlio_proc = subprocess.Popen(cmd)
+                self._fastlio_started_at = time.time()
+            elif display_ok and xterm:
+                # 在 xterm 中启动，-hold 保持窗口
+                cmd = [
+                    xterm,
+                    "-hold",
+                    "-e",
+                    "bash",
+                    "-lc",
+                    f"{launch_cmd} 2>&1 | tee -a '{log_file}'"
+                ]
+                print(f"[fastlio] 使用 xterm 启动，日志: {log_file}")
+                self._fastlio_proc = subprocess.Popen(cmd)
+                self._fastlio_started_at = time.time()
+            else:
+                # 后台运行，输出到日志
+                print(f"[fastlio] 无可用终端，后台运行。日志: {log_file}")
+                log_fh = open(log_file, "a", buffering=1)
+                self._fastlio_proc = subprocess.Popen(
+                    ["bash", "-lc", launch_cmd],
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
+                    preexec_fn=os.setsid
+                )
+                self._fastlio_started_at = time.time()
+                print(f"[fastlio] 后台启动成功，PID: {self._fastlio_proc.pid}")
+
         except Exception as e:
-            print(f"? 启动fastlio导航失败: {e}")
+            print(f"[fastlio] 启动失败: {e}")
     
     def _can_trigger_after_nav(self, wait_seconds: float = 10.0) -> bool:
         """检查是否可以在导航启动后触发动作"""
