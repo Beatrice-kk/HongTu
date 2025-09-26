@@ -35,7 +35,7 @@ include_directories(
 ## ÉùÃ÷Python½Å±¾
 catkin_install_python(PROGRAMS
   src/dance_navigation_node.py
-  scripts/simplified_nav_dance.py
+  scripts/new_plan.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

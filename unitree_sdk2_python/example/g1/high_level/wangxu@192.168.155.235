@@ -2974,16 +2974,16 @@ def main(return_remote=False):
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
 
-                # Start + Up: 导航启动≥10秒后触发 simplified_nav_dance.py -a
+                # Start + Up: 导航启动≥10秒后触发 simplnew_plana
                 elif remote.get_combo_once('Start', 'Up'):
                     if player.function_activated:  # 只有功能激活后才能使用
                         if player._can_trigger_after_nav(10.0):
-                            print("🎭 检测到 Start + Up，触发 simplified_nav_dance.py")
+                            print("🎭 检测到 Start + Up，触发 simpnew_plan)
                             try:
                                 # 在独立后台进程中运行，避免阻塞
                                 subprocess.Popen([
                                     "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'A'"
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'A'"
                                 ])
                                 if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                     player.audio_processor.audio_client.TtsMaker("开始表演 祖国的好山河 ", 0)
@@ -2994,7 +2994,7 @@ def main(return_remote=False):
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
 
-                # Start + Down: 导航启动≥10秒后触发 simplified_nav_dance.py
+                # Start + Down: 导航启动≥10秒后触发 simplnew_plan
                 elif remote.get_combo_once('Start', 'Down'):
                     if player.function_activated:  # 只有功能激活后才能使用
                         if player._can_trigger_after_nav(10.0):
@@ -3003,7 +3003,7 @@ def main(return_remote=False):
                                 # 在独立后台进程中运行，避免阻塞
                                 subprocess.Popen([
                                     "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'B'"
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'B'"
                                 ])
                                 if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                     player.audio_processor.audio_client.TtsMaker("开始表演 沙家浜总有一天会解放", 0)
@@ -3014,16 +3014,16 @@ def main(return_remote=False):
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
                         
-                # Start + Right: 导航启动≥10秒后触发 simplified_nav_dance.py
+                # Start + Right: 导航启动≥10秒后触发 simplnew_plan
                 elif remote.get_combo_once('Start', 'Right'):
                     if player.function_activated:  # 只有功能激活后才能使用
                         if player._can_trigger_after_nav(10.0):
-                            print("🎭 检测到 Start + Right，触发 simplified_nav_dance.py")
+                            print("🎭 检测到 Start + Right，触发 simpnew_plan)
                             try:
                                 # 在独立后台进程中运行，避免阻塞
                                 subprocess.Popen([
                                     "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'X'"
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'X'"
                                 ])
                                 if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                     player.audio_processor.audio_client.TtsMaker("开始表演 军民鱼水情", 0)
@@ -3034,16 +3034,16 @@ def main(return_remote=False):
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
                         
-                # Start + Left: 导航启动≥10秒后触发 simplified_nav_dance.py
+                # Start + Left: 导航启动≥10秒后触发 simplnew_plan
                 elif remote.get_combo_once('Start', 'Left'):
                     if player.function_activated:  # 只有功能激活后才能使用
                         if player._can_trigger_after_nav(10.0):
-                            print("🎭 检测到 Start + Left，触发 simplified_nav_dance.py")
+                            print("🎭 检测到 Start + Left，触发 simpnew_plan)
                             try:
                                 # 在独立后台进程中运行，避免阻塞
                                 subprocess.Popen([
                                     "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'Y'"
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Y'"
                                 ])
                                 if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                     player.audio_processor.audio_client.TtsMaker("开始表演 智斗", 0)
@@ -3060,7 +3060,7 @@ def main(return_remote=False):
                             # 在独立后台进程中运行，避免阻塞
                             subprocess.Popen([
                                 "bash", "-lc",
-                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'Q'"
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Q'"
                             ])
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                 player.audio_processor.audio_client.TtsMaker("上台", 0)
@@ -3075,7 +3075,7 @@ def main(return_remote=False):
                             # 在独立后台进程中运行，避免阻塞
                             subprocess.Popen([
                                 "bash", "-lc",
-                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'H'"
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'H'"
                             ])
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                 player.audio_processor.audio_client.TtsMaker("下台", 0)

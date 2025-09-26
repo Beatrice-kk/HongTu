@@ -1425,16 +1425,18 @@ class G1ActionPlayer:
             # 而是让update方法中的move_to_initial状态处理逻辑继续执行直到完成
             print("🔄 已在回到初始姿态过程中，等待平滑过渡完成")
             pass
-        else:
-            # 如果当前状态已经是stopped或其他状态，确保臂部控制被禁用
-            try:
-                self.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
-                self.low_cmd.crc = self.crc.Crc(self.low_cmd)
-                if self.publisher is not None:
-                    self.publisher.Write(self.low_cmd)
-                print("✅ 确保臂部控制已禁用")
-            except Exception as e:
-                print(f"⚠️ 禁用臂部控制时出错: {e}")
+        elif self.state == "move_to_initial":
+            # 如果已经在回到初始姿态的过程中，直接完成
+            # 主动释放手臂
+            if self.arm_action_client and self.action_map:
+                try:
+                    self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
+                    print("✅ 手臂已释放")
+                except Exception as e:
+                    print(f"⚠️ 释放手臂时出错: {e}")
+            
+            self.state = "stopped"
+            print("✅ 状态已设置为 stopped")
 
     def _init_audio_sync(self):
         """初始化音频同步相关属性"""
@@ -1639,10 +1641,6 @@ class G1ActionPlayer:
         """
         try:
             print(f"🔊 开始播放TTS文本并同时播放{action_dir_name}目录下的动作")
-            
-            # 保存原始音量并设置为最小音量
-            self._save_original_volume()
-            self._set_volume_to_minimum()
             
             # 设置TTS播放状态为True
             self.tts_playing = True
@@ -1902,9 +1900,6 @@ class G1ActionPlayer:
             # 注意：不在这里释放手臂和禁用臂部控制，因为stop_play()已经处理了这些操作
             # 并且可能正在进行平滑过渡到初始姿态的过程，过早释放会影响平滑性
             
-            # 恢复原始音量
-            self._restore_original_volume()
-            
             # 确保重置TTS播放状态
             self.tts_playing = False
 
@@ -1931,14 +1926,6 @@ class G1ActionPlayer:
 
         # 在停止状态下不发送任何控制指令，让遥控器正常工作
         if self.state == "stopped":
-            # 确保臂部控制被禁用，以便遥控器可以控制
-            try:
-                self.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
-                self.low_cmd.crc = self.crc.Crc(self.low_cmd)
-                if self.publisher is not None:
-                    self.publisher.Write(self.low_cmd)
-            except Exception as e:
-                print(f"⚠️ 禁用臂部控制时出错: {e}")
             return
             
         # 在停止状态下不发送任何控制指令，让遥控器正常工作
@@ -2183,8 +2170,7 @@ class G1ActionPlayer:
                 try:
                     self.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
                     self.low_cmd.crc = self.crc.Crc(self.low_cmd)
-                    if self.publisher is not None:
-                        self.publisher.Write(self.low_cmd)
+                    self.publisher.Write(self.low_cmd)
                     print("✅ 臂部控制已禁用")
                 except Exception as e:
                     print(f"⚠️ 禁用臂部控制时出错: {e}")
@@ -2285,14 +2271,6 @@ class G1ActionPlayer:
                     stderr=subprocess.STDOUT,
                 )
                 self._fastlio_started_at = time.time()
-            
-            # 启动重定位监测
-            if self._fastlio_proc is not None:
-                import threading
-                monitoring_thread = threading.Thread(target=self._monitor_relocalization)
-                monitoring_thread.daemon = True
-                monitoring_thread.start()
-                
         except Exception as e:
             print(f"[fastlio] 启动失败: {e}")
             self._fastlio_started_at = None
@@ -2307,246 +2285,6 @@ class G1ActionPlayer:
         if self._fastlio_started_at is None:
             return False
         return (time.time() - self._fastlio_started_at) >= wait_seconds
-
-    def _monitor_relocalization(self):
-        """监测重定位状态"""
-        try:
-            print("🔍 开始监测重定位状态...")
-            
-            # 等待8秒让系统完全启动
-            print("⏳ 等待系统启动...")
-            time.sleep(8)
-            
-            # 监测30秒 (增加监测时间)
-            start_time = time.time()
-            timeout = 30.0
-            
-            print("🔍 开始检查重定位状态...")
-            
-            while time.time() - start_time < timeout:
-                elapsed = time.time() - start_time
-                print(f"⏰ 监测中... ({elapsed:.1f}s/{timeout}s)")
-                
-                if self._check_relocalization_status():
-                    print("✅ 重定位成功!")
-                    if hasattr(self, 'audio_processor') and hasattr(self.audio_processor, 'audio_client'):
-                        self.audio_processor.audio_client.TtsMaker("重定位成功，导航已就绪，十秒后可按方向键触发动作", 0)
-                    return True
-                
-                time.sleep(2)  # 每2秒检查一次，减少系统负载
-            
-            # 30秒后仍未成功
-            print("❌ 重定位失败，关闭导航程序")
-            self._shutdown_navigation_systems()
-            if hasattr(self, 'audio_processor') and hasattr(self.audio_processor, 'audio_client'):
-                self.audio_processor.audio_client.TtsMaker("重定位失败，导航程序已关闭，请把机器人移动到指定位置重新启动程序", 0)
-            
-            return False
-            
-        except Exception as e:
-            print(f"❌ 重定位监测失败: {e}")
-            return False
-    
-    def _check_relocalization_status(self):
-        """检查重定位状态"""
-        try:
-            import subprocess
-            
-            # 方法1: 检查重定位服务状态 (最准确)
-            result = subprocess.run(
-                ["rosservice", "call", "/slam_reloc_check", "{}"],
-                capture_output=True, text=True, check=False, timeout=3
-            )
-            
-            if result.returncode == 0:
-                # 解析服务返回结果
-                if "status: True" in result.stdout or "status: 1" in result.stdout:
-                    print("📍 重定位服务确认成功")
-                    return True
-                elif "status: False" in result.stdout or "status: 0" in result.stdout:
-                    print("📍 重定位服务确认失败")
-                    return False
-            
-            # 方法2: 检查重定位节点是否还在运行 (间接判断)
-            result = subprocess.run(
-                ["pgrep", "-f", "one_key_reloc_node"],
-                capture_output=True, text=True, check=False
-            )
-            
-            # 如果重定位节点已经退出，说明重定位完成
-            if result.returncode != 0:  # 进程不存在
-                print("📍 重定位节点已退出，检查定位质量...")
-                
-                # 检查tf变换是否正常
-                tf_result = subprocess.run(
-                    ["rostopic", "echo", "/tf", "-n", "1", "--timeout", "2"],
-                    capture_output=True, text=True, check=False
-                )
-                
-                if tf_result.returncode == 0 and "map" in tf_result.stdout and "base_link" in tf_result.stdout:
-                    print("📍 检测到tf变换正常，重定位成功")
-                    return True
-            
-            # 方法3: 检查amcl_pose话题 (备用检查)
-            result = subprocess.run(
-                ["rostopic", "echo", "/amcl_pose", "-n", "1", "--timeout", "2"],
-                capture_output=True, text=True, check=False
-            )
-            
-            if result.returncode == 0 and result.stdout.strip():
-                print("📍 检测到amcl_pose话题正常，定位成功")
-                return True
-            
-            return False
-            
-        except Exception as e:
-            print(f"⚠️ 检查重定位状态时出错: {e}")
-            return False
-
-    def _save_original_volume(self):
-        """保存原始音量设置"""
-        try:
-            if hasattr(self, 'audio_processor') and hasattr(self.audio_processor, 'audio_client'):
-                code, volume_data = self.audio_processor.audio_client.GetVolume()
-                if code == 0 and volume_data:
-                    self.original_volume = volume_data.get('volume', 100)
-                    print(f"🔊 已保存原始音量: {self.original_volume}")
-                else:
-                    self.original_volume = 100  # 默认音量
-                    print(f"⚠️ 无法获取当前音量，使用默认值: {self.original_volume}")
-            else:
-                self.original_volume = 100
-                print(f"⚠️ 音频客户端不可用，使用默认音量: {self.original_volume}")
-        except Exception as e:
-            self.original_volume = 100
-            print(f"⚠️ 保存原始音量失败: {e}，使用默认音量: {self.original_volume}")
-    
-    def _set_volume(self, volume):
-        """设置音量"""
-        try:
-            if hasattr(self, 'audio_processor') and hasattr(self.audio_processor, 'audio_client'):
-                code = self.audio_processor.audio_client.SetVolume(volume)
-                if code == 0:
-                    print(f"🔊 音量已设置为: {volume}")
-                    return True
-                else:
-                    print(f"⚠️ 设置音量失败，错误码: {code}")
-                    return False
-            else:
-                print("⚠️ 音频客户端不可用，无法设置音量")
-                return False
-        except Exception as e:
-            print(f"⚠️ 设置音量时出错: {e}")
-            return False
-    
-    def _set_volume_to_minimum(self):
-        """将音量设置为最小"""
-        return self._set_volume(0)
-    
-    def _restore_original_volume(self):
-        """恢复原始音量"""
-        if self.original_volume is not None:
-            return self._set_volume(self.original_volume)
-        else:
-            return self._set_volume(100)  # 默认音量
-
-    def _shutdown_navigation_systems(self):
-        """关闭所有导航建图相关程序"""
-        try:
-            print("🛑 开始关闭所有导航建图相关程序...")
-            
-            # 关闭fastlio进程
-            if self._fastlio_proc is not None:
-                print("🛑 关闭fastlio导航进程...")
-                self._fastlio_proc.terminate()
-                try:
-                    self._fastlio_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    print("⚠️ fastlio进程未正常退出，强制终止...")
-                    self._fastlio_proc.kill()
-                self._fastlio_proc = None
-                self._fastlio_started_at = None
-            
-            # 关闭ROS相关进程
-            print("🛑 关闭ROS导航相关进程...")
-            try:
-                # 关闭move_base
-                subprocess.run(["pkill", "-f", "move_base"], check=False)
-                # 关闭amcl
-                subprocess.run(["pkill", "-f", "amcl"], check=False)
-                # 关闭map_server
-                subprocess.run(["pkill", "-f", "map_server"], check=False)
-                # 关闭fastlio相关进程
-                subprocess.run(["pkill", "-f", "fastlio"], check=False)
-                # 关闭重定位进程
-                subprocess.run(["pkill", "-f", "auto_relocalize"], check=False)
-                # 关闭rviz
-                subprocess.run(["pkill", "-f", "rviz"], check=False)
-                print("✅ 导航相关进程已关闭")
-            except Exception as e:
-                print(f"⚠️ 关闭ROS进程时出错: {e}")
-            
-            print("✅ 所有导航建图相关程序已关闭")
-            
-        except Exception as e:
-            print(f"❌ 关闭导航系统失败: {e}")
-
-    def cleanup(self):
-        """清理资源，确保服务正确释放"""
-        try:
-            print("🧹 开始清理G1ActionPlayer资源...")
-            
-            # 停止所有播放
-            self.stop_play(no_tts=True)
-            
-            # 清理发布器
-            if hasattr(self, 'publisher') and self.publisher is not None:
-                try:
-                    # 发送停止命令
-                    if hasattr(self, 'low_cmd') and self.low_cmd is not None:
-                        # 设置所有关节为零力矩模式
-                        for i in range(15):
-                            self.low_cmd.motor_cmd[i].q = 0.0
-                            self.low_cmd.motor_cmd[i].dq = 0.0
-                            self.low_cmd.motor_cmd[i].kp = 0.0
-                            self.low_cmd.motor_cmd[i].kd = 0.0
-                            self.low_cmd.motor_cmd[i].tau = 0.0
-                        self.publisher.Write(self.low_cmd)
-                    self.publisher = None
-                    print("✅ 发布器已清理")
-                except Exception as e:
-                    print(f"⚠️ 清理发布器时出错: {e}")
-            
-            # 重置状态
-            self.state = "stopped"
-            self.current_action = None
-            self.current_pose = None
-            self.tts_playing = False
-            self.audio_playback_active = False
-            
-            # 清理音频相关资源
-            if hasattr(self, 'audio_processor') and self.audio_processor is not None:
-                try:
-                    if hasattr(self.audio_processor, 'cleanup'):
-                        self.audio_processor.cleanup()
-                    print("✅ 音频处理器已清理")
-                except Exception as e:
-                    print(f"⚠️ 清理音频处理器时出错: {e}")
-            
-            # 关闭导航系统
-            self._shutdown_navigation_systems()
-            
-            print("✅ G1ActionPlayer 资源清理完成")
-            
-        except Exception as e:
-            print(f"❌ 清理资源时出错: {e}")
-    
-    def __del__(self):
-        """析构函数，确保资源被清理"""
-        try:
-            self.cleanup()
-        except:
-            pass
 
 
 # -------------------------------
@@ -2825,75 +2563,9 @@ def main(return_remote=False):
                     resp.message = str(e)
                 return resp
 
-            def _handle_play_up(_req):
-                resp = TriggerResponse()
-                try:
-                    rospy.loginfo("收到 play_up 请求")
-                    
-                    # 若正在播放，先停止
-                    if player.state != "stopped":
-                        player.stop_play()
-                        wait_t0 = time.time()
-                        while player.state != "stopped" and (time.time()-wait_t0) < 5.0:
-                            time.sleep(0.1)
-                    
-                    # 播放Up模式的TTS和动作
-                    player._play_tts_with_action(player.tts_presets['B'], "start_b", 0)
-                    
-                    # 等待完成（最多120秒）
-                    t0 = time.time()
-                    while player.state != "stopped" and (time.time()-t0) < 120.0:
-                        time.sleep(0.1)
-                    
-                    if player.state == "stopped":
-                        resp.success = True
-                        resp.message = "Up模式完成"
-                    else:
-                        resp.success = False
-                        resp.message = "Up模式超时"
-                except Exception as e:
-                    rospy.logerr(f"处理 play_up 出错: {e}")
-                    resp.success = False
-                    resp.message = str(e)
-                return resp
-
-            def _handle_play_down(_req):
-                resp = TriggerResponse()
-                try:
-                    rospy.loginfo("收到 play_down 请求")
-                    
-                    # 若正在播放，先停止
-                    if player.state != "stopped":
-                        player.stop_play()
-                        wait_t0 = time.time()
-                        while player.state != "stopped" and (time.time()-wait_t0) < 5.0:
-                            time.sleep(0.1)
-                    
-                    # 播放Down模式的TTS和动作
-                    player._play_tts_with_action(player.tts_presets['C'], "start_x", 0)
-                    
-                    # 等待完成（最多120秒）
-                    t0 = time.time()
-                    while player.state != "stopped" and (time.time()-t0) < 120.0:
-                        time.sleep(0.1)
-                    
-                    if player.state == "stopped":
-                        resp.success = True
-                        resp.message = "Down模式完成"
-                    else:
-                        resp.success = False
-                        resp.message = "Down模式超时"
-                except Exception as e:
-                    rospy.logerr(f"处理 play_down 出错: {e}")
-                    resp.success = False
-                    resp.message = str(e)
-                return resp
-
             rospy.Subscriber("dance_direction", RosString, _direction_cb, queue_size=10)
             rospy.Service("play_dance", Trigger, _handle_play_dance)
-            rospy.Service("play_up", Trigger, _handle_play_up)
-            rospy.Service("play_down", Trigger, _handle_play_down)
-            print("✅ ROS 服务已提供: play_dance, play_up, play_down，订阅: dance_direction")
+            print("✅ ROS 服务已提供: play_dance，订阅: dance_direction")
         except Exception as e:
             print(f"⚠️ ROS 初始化失败（忽略）：{e}")
 
@@ -3090,99 +2762,96 @@ def main(return_remote=False):
                     player.play_action('Y', speed=1.0)  # 慢速播放
                 # Start + L1: 启动 fastlio 导航
                 elif remote.get_combo_once('Start', 'L1'):
-                    if player.function_activated:  # 只有功能激活后才能使用
-                        print("🚀 检测到 Start + L1，启动 fastlio 导航 (use_rviz:=false)")
-                        try:
-                            player._start_fastlio_navigation()
-                            # 反馈一次TTS（可选）
-                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                player.audio_processor.audio_client.TtsMaker("启动导航", 0)
-                        except Exception as e:
-                            print(f"[fastlio] 触发失败: {e}")
-                        
-         
-                    else:
-                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
+                    print("🚀 检测到 Start + Up，启动 fastlio 导航 (use_rviz:=false)")
+                    try:
+                        player._start_fastlio_navigation()
+                        # 反馈一次TTS（可选）
+                        if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                            player.audio_processor.audio_client.TtsMaker("启动导航", 0)
+                    except Exception as e:
+                        print(f"[fastlio] 触发失败: {e}")
+                    
+                    try:
+                        # 在独立后台进程中运行，避免阻塞
+                        subprocess.Popen([
+                            "bash", "-lc",
+                            "python3 /home/unitree/HongTu/unitree_sdk_python/example/g1/high_level/g1_contrl.py"
+                        ])
+                        if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                            player.audio_processor.audio_client.TtsMaker("启动控制程序", 0)
+                    except Exception as e:
+                        print(f"[mock_dance] 启动失败: {e}")
+           
 
                 # Start + Up: 导航启动≥10秒后触发 simplified_nav_dance.py -a
                 elif remote.get_combo_once('Start', 'Up'):
-                    if player.function_activated:  # 只有功能激活后才能使用
-                        if player._can_trigger_after_nav(10.0):
-                            print("🎭 检测到 Start + Up，触发 simplified_nav_dance.py")
-                            try:
-                                # 在独立后台进程中运行，避免阻塞
-                                subprocess.Popen([
-                                    "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'A'"
-                                ])
-                                if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                    player.audio_processor.audio_client.TtsMaker("开始表演 祖国的好山河 ", 0)
-                            except Exception as e:
-                                print(f"[mock_dance] 启动失败: {e}")
-                        else:
-                            print("[mock_dance] 导航未满10秒，忽略 Start+Up 触发")
+                    if player._can_trigger_after_nav(10.0):
+                        print("🎭 检测到 Start + Down，触发 simplified_nav_dance.py")
+                        try:
+                            # 在独立后台进程中运行，避免阻塞
+                            subprocess.Popen([
+                                "bash", "-lc",
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'A'"
+                            ])
+                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                player.audio_processor.audio_client.TtsMaker("开始表演 祖国的好山河 ", 0)
+                        except Exception as e:
+                            print(f"[mock_dance] 启动失败: {e}")
                     else:
-                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
+                        print("[mock_dance] 导航未满10秒，忽略 Start+Down 触发")
 
+                
                 # Start + Down: 导航启动≥10秒后触发 simplified_nav_dance.py
                 elif remote.get_combo_once('Start', 'Down'):
-                    if player.function_activated:  # 只有功能激活后才能使用
-                        if player._can_trigger_after_nav(10.0):
-                            print("🎭 检测到 Start + Down，触发 mock_dance_trigger.py")
-                            try:
-                                # 在独立后台进程中运行，避免阻塞
-                                subprocess.Popen([
-                                    "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'B'"
-                                ])
-                                if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                    player.audio_processor.audio_client.TtsMaker("开始表演 沙家浜总有一天会解放", 0)
-                            except Exception as e:
-                                print(f"[mock_dance] 启动失败: {e}")
-                        else:
-                            print("[mock_dance] 导航未满10秒，忽略 Start+Down 触发")
+                    if player._can_trigger_after_nav(10.0):
+                        print("🎭 检测到 Start + Down，触发 mock_dance_trigger.py")
+                        try:
+                            # 在独立后台进程中运行，避免阻塞
+                            subprocess.Popen([
+                                "bash", "-lc",
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'B'"
+                            ])
+                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                player.audio_processor.audio_client.TtsMaker("开始表演 沙家浜总有一天会解放", 0)
+                        except Exception as e:
+                            print(f"[mock_dance] 启动失败: {e}")
                     else:
-                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
-                        
+                        print("[mock_dance] 导航未满10秒，忽略 Start+Down 触发")
                 # Start + Right: 导航启动≥10秒后触发 simplified_nav_dance.py
                 elif remote.get_combo_once('Start', 'Right'):
-                    if player.function_activated:  # 只有功能激活后才能使用
-                        if player._can_trigger_after_nav(10.0):
-                            print("🎭 检测到 Start + Right，触发 simplified_nav_dance.py")
-                            try:
-                                # 在独立后台进程中运行，避免阻塞
-                                subprocess.Popen([
-                                    "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'X'"
-                                ])
-                                if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                    player.audio_processor.audio_client.TtsMaker("开始表演 军民鱼水情", 0)
-                            except Exception as e:
-                                print(f"[mock_dance] 启动失败: {e}")
-                        else:
-                            print("[mock_dance] 导航未满10秒，忽略 Start+Right 触发")
+                    if player._can_trigger_after_nav(10.0):
+                        print("🎭 检测到 Start + Down，触发 mock_dance_trigger.py")
+                        try:
+                            # 在独立后台进程中运行，避免阻塞
+                            subprocess.Popen([
+                                "bash", "-lc",
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'X'"
+                            ])
+                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                player.audio_processor.audio_client.TtsMaker("开始表演 军民鱼水情", 0)
+                        except Exception as e:
+                            print(f"[mock_dance] 启动失败: {e}")
                     else:
-                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
-                        
+                        print("[mock_dance] 导航未满10秒，忽略 Start+Down 触发")
                 # Start + Left: 导航启动≥10秒后触发 simplified_nav_dance.py
                 elif remote.get_combo_once('Start', 'Left'):
-                    if player.function_activated:  # 只有功能激活后才能使用
-                        if player._can_trigger_after_nav(10.0):
-                            print("🎭 检测到 Start + Left，触发 simplified_nav_dance.py")
-                            try:
-                                # 在独立后台进程中运行，避免阻塞
-                                subprocess.Popen([
-                                    "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'Y'"
-                                ])
-                                if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                    player.audio_processor.audio_client.TtsMaker("开始表演 智斗", 0)
-                            except Exception as e:
-                                print(f"[mock_dance] 启动失败: {e}")
-                        else:
-                            print("[mock_dance] 导航未满10秒，忽略 Start+Left 触发")
+                    if player._can_trigger_after_nav(10.0):
+                        print("🎭 检测到 Start + Down，触发 mock_dance_trigger.py")
+                        try:
+                            # 在独立后台进程中运行，避免阻塞
+                            subprocess.Popen([
+                                "bash", "-lc",
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py --dance 'Y'"
+                            ])
+                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                player.audio_processor.audio_client.TtsMaker("开始表演 智斗", 0)
+                        except Exception as e:
+                            print(f"[mock_dance] 启动失败: {e}")
                     else:
-                        print("🔒 功能未激活，请先按 F1 + Start 激活功能")
+                        print("[mock_dance] 导航未满10秒，忽略 Start+Down 触发")
+ 
+
+
                 # Start + R1: 去上台
                 elif remote.get_combo_once('Start', 'R1'):
                     if player._can_trigger_after_nav(10.0):
@@ -3321,15 +2990,6 @@ def main(return_remote=False):
                     time.sleep(0.05)  # 50ms延迟
             else:
                 # 功能未激活时，让机器人可以正常响应遥控器控制
-                # 确保臂部控制被禁用，以便遥控器可以控制
-                try:
-                    player.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
-                    player.low_cmd.crc = player.crc.Crc(player.low_cmd)
-                    if player.publisher is not None:
-                        player.publisher.Write(player.low_cmd)
-                except Exception as e:
-                    print(f"⚠️ 禁用臂部控制时出错: {e}")
-                
                 # 不再主动发送停止命令或回到零位命令
                 # 只有在动作播放时才停止
                 if player.state not in ["stopped", "move_to_initial"]:
@@ -3433,15 +3093,6 @@ def main(return_remote=False):
                 player._last_exit_tts_time = current_time
     except Exception as e:
         print(f"❌ 退出提示失败: {e}")
-
-    # 清理G1ActionPlayer资源
-    try:
-        if player:
-            print("🧹 开始清理G1ActionPlayer资源...")
-            player.cleanup()
-            print("✅ G1ActionPlayer资源清理完成")
-    except Exception as e:
-        print(f"❌ 清理G1ActionPlayer资源失败: {e}")
 
     print("\n👋 程序退出")
     

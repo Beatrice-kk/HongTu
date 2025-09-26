@@ -42,13 +42,13 @@ Toolbars:
 Visualization Manager:
   Class: ""
   Displays:
-    - Alpha: 0.5
+    - Alpha: 0.3
       Cell Size: 1
       Class: rviz/Grid
-      Color: 160; 160; 164
+      Color: 200; 200; 200
       Enabled: true
       Line Style:
-        Line Width: 0.029999999329447746
+        Line Width: 0.02
         Value: Lines
       Name: Grid
       Normal Cell Count: 0
@@ -57,43 +57,34 @@ Visualization Manager:
         Y: 0
         Z: 0
       Plane: XY
-      Plane Cell Count: 10
+      Plane Cell Count: 20
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz/Group
       Displays:
-        - Alpha: 1
+        - Alpha: 1.2
           Class: rviz/Axes
           Enabled: true
-          Length: 1
-          Name: Axes
-          Radius: 0.10000000149011612
+          Length: 0.4
+          Name: Robot Axes
+          Radius: 0.05
           Reference Frame: base_link
           Show Trail: false
           Value: true
-        - Alpha: 1
+        - Alpha: 0.8
           Class: rviz/Axes
           Enabled: false
-          Length: 1
-          Name: Axes
-          Radius: 0.10000000149011612
-          Reference Frame: body
+          Length: 2
+          Name: Map Axes
+          Radius: 0.08
+          Reference Frame: map
           Show Trail: false
           Value: false
-        # - Alpha: 1
-        #   Class: rviz/Axes
-        #   Enabled: true
-        #   Length: 1
-        #   Name: Axes
-        #   Radius: 0.10000000149011612
-        #   Reference Frame: map
-        #   Show Trail: false
-        #   Value: false
       Enabled: true
       Name: tf
     - Class: rviz/Group
       Displays:
-        - Alpha: 1
+        - Alpha: 0.8
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
             Max Value: 10
@@ -102,26 +93,26 @@ Visualization Manager:
           Axis: Z
           Channel Name: intensity
           Class: rviz/PointCloud2
-          Color: 255; 255; 255
+          Color: 100; 200; 255
           Color Transformer: Intensity
           Decay Time: 0
           Enabled: true
           Invert Rainbow: false
-          Max Color: 255; 255; 255
-          Min Color: 0; 0; 0
-          Name: local_traversibility_ponit_cloud
+          Max Color: 255; 100; 100
+          Min Color: 100; 100; 255
+          Name: Local Traversibility Cloud
           Position Transformer: XYZ
           Queue Size: 10
           Selectable: true
-          Size (Pixels): 3
-          Size (m): 0.10000000149011612
+          Size (Pixels): 2
+          Size (m): 0.08
           Style: Flat Squares
           Topic: /map_cloud_original
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
           Value: true
-        - Alpha: 1
+        - Alpha: 0.9
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
             Max Value: 10
@@ -130,19 +121,19 @@ Visualization Manager:
           Axis: Z
           Channel Name: z
           Class: rviz/PointCloud2
-          Color: 255; 255; 255
+          Color: 200; 255; 200
           Color Transformer: Intensity
           Decay Time: 0
           Enabled: true
           Invert Rainbow: false
-          Max Color: 255; 255; 255
-          Min Color: 0; 0; 0
-          Name: map_cloud
+          Max Color: 255; 255; 100
+          Min Color: 100; 200; 100
+          Name: Map Cloud
           Position Transformer: XYZ
           Queue Size: 10
           Selectable: true
-          Size (Pixels): 3
-          Size (m): 0.10000000149011612
+          Size (Pixels): 2
+          Size (m): 0.06
           Style: Points
           Topic: /map_cloud
           Unreliable: false
@@ -153,12 +144,12 @@ Visualization Manager:
       Name: Local
     - Class: rviz/Group
       Displays:
-        - Alpha: 0.699999988079071
+        - Alpha: 0.8
           Class: rviz/Map
           Color Scheme: map
           Draw Behind: false
           Enabled: true
-          Name: Map
+          Name: 2D Map
           Topic: /map_2d
           Unreliable: false
           Use Timestamp: false
@@ -166,28 +157,28 @@ Visualization Manager:
         - Alpha: 1
           Buffer Length: 1
           Class: rviz/Path
-          Color: 200; 0; 3
+          Color: 180; 50; 50
           Enabled: true
-          Head Diameter: 0.30000001192092896
-          Head Length: 0.20000000298023224
-          Length: 0.30000001192092896
+          Head Diameter: 0.3
+          Head Length: 0.25
+          Length: 0.3
           Line Style: Billboards
-          Line Width: 0.20000000298023224
-          Name: global_path
+          Line Width: 0.08
+          Name: Global Path
           Offset:
             X: 0
             Y: 0
-            Z: 0
-          Pose Color: 255; 85; 255
+            Z: 0.1
+          Pose Color: 200; 150; 50
           Pose Style: None
           Queue Size: 10
-          Radius: 0.029999999329447746
-          Shaft Diameter: 0.10000000149011612
-          Shaft Length: 0.10000000149011612
+          Radius: 0.03
+          Shaft Diameter: 0.05
+          Shaft Length: 0.1
           Topic: /move_base/GlobalPlanner/plan
           Unreliable: false
           Value: true
-        - Alpha: 1
+        - Alpha: 0.9
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
             Max Value: 10
@@ -196,26 +187,26 @@ Visualization Manager:
           Axis: Z
           Channel Name: z
           Class: rviz/PointCloud2
-          Color: 255; 255; 255
+          Color: 150; 200; 255
           Color Transformer: Intensity
           Decay Time: 0
           Enabled: true
           Invert Rainbow: false
-          Max Color: 255; 255; 255
-          Min Color: 0; 0; 0
-          Name: global_filtered_cloud
+          Max Color: 255; 150; 150
+          Min Color: 150; 150; 255
+          Name: Global Filtered Cloud
           Position Transformer: XYZ
           Queue Size: 10
           Selectable: true
-          Size (Pixels): 3
-          Size (m): 0.05000000074505806
+          Size (Pixels): 2
+          Size (m): 0.04
           Style: Flat Squares
           Topic: /filtered_cloud
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
           Value: true
-        - Alpha: 1
+        - Alpha: 0.8
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
             Max Value: 10
@@ -224,19 +215,19 @@ Visualization Manager:
           Axis: Z
           Channel Name: intensity
           Class: rviz/PointCloud2
-          Color: 255; 255; 255
+          Color: 255; 200; 100
           Color Transformer: Intensity
           Decay Time: 0
           Enabled: true
           Invert Rainbow: true
-          Max Color: 255; 255; 255
-          Min Color: 0; 0; 0
-          Name: global_cloud
+          Max Color: 255; 100; 100
+          Min Color: 100; 200; 255
+          Name: Global Cloud
           Position Transformer: XYZ
           Queue Size: 10
           Selectable: true
-          Size (Pixels): 3
-          Size (m): 0.05000000074505806
+          Size (Pixels): 2
+          Size (m): 0.04
           Style: Flat Squares
           Topic: /global_cloud
           Unreliable: false
@@ -246,24 +237,24 @@ Visualization Manager:
         - Alpha: 1
           Buffer Length: 1
           Class: rviz/Path
-          Color: 25; 255; 0
+          Color: 100; 255; 100
           Enabled: true
-          Head Diameter: 0.30000001192092896
-          Head Length: 0.20000000298023224
-          Length: 0.30000001192092896
+          Head Diameter: 0.3
+          Head Length: 0.25
+          Length: 0.3
           Line Style: Billboards
-          Line Width: 0.10000000149011612
-          Name: teach_path
+          Line Width: 0.08
+          Name: Teach Path
           Offset:
             X: 0
             Y: 0
-            Z: 0
-          Pose Color: 255; 85; 255
+            Z: 0.05
+          Pose Color: 255; 150; 255
           Pose Style: None
           Queue Size: 10
-          Radius: 0.029999999329447746
-          Shaft Diameter: 0.10000000149011612
-          Shaft Length: 0.10000000149011612
+          Radius: 0.03
+          Shaft Diameter: 0.06
+          Shaft Length: 0.1
           Topic: /teach_path
           Unreliable: false
           Value: true
@@ -271,32 +262,16 @@ Visualization Manager:
       Name: Global
     - Alpha: 1
       Class: rviz/PointStamped
-      Color: 204; 41; 204
+      Color: 255; 100; 255
       Enabled: true
       History Length: 1
-      Name: way_point
+      Name: Way Point
       Queue Size: 10
-      Radius: 0.20000000298023224
+      Radius: 0.3
       Topic: /way_point
       Unreliable: false
       Value: true
-    # - Alpha: 1
-    #   Class: rviz/RobotModel
-    #   Collision Enabled: false
-    #   Enabled: true
-    #   Links:
-    #     All Links Enabled: true
-    #     Expand Joint Details: false
-    #     Expand Link Details: false
-    #     Expand Tree: false
-    #     Link Tree Style: Links in Alphabetic Order
-    #   Name: RobotModel
-    #   Robot Description: robot_description
-    #   TF Prefix: ""
-    #   Update Interval: 0
-    #   Value: true
-    #   Visual Enabled: true
-    - Alpha: 1
+    - Alpha: 0.9
       Autocompute Intensity Bounds: false
       Autocompute Value Bounds:
         Max Value: 10
@@ -305,21 +280,21 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Class: rviz/PointCloud2
-      Color: 255; 255; 255
+      Color: 255; 200; 100
       Color Transformer: Intensity
       Decay Time: 0
       Enabled: true
       Invert Rainbow: true
-      Max Color: 255; 255; 255
+      Max Color: 255; 150; 150
       Max Intensity: 60
-      Min Color: 0; 0; 0
+      Min Color: 100; 150; 255
       Min Intensity: -20
-      Name: PointCloud2
+      Name: Tomogram
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 3
-      Size (m): 0.10000000149011612
+      Size (Pixels): 2
+      Size (m): 0.08
       Style: Boxes
       Topic: /tomogram
       Unreliable: false
@@ -329,7 +304,7 @@ Visualization Manager:
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /normals_marker
-      Name: Marker
+      Name: Normals Marker
       Namespaces:
         {}
       Queue Size: 100
@@ -337,12 +312,12 @@ Visualization Manager:
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /map_edit_markers
-      Name: Marker
+      Name: Map Edit Markers
       Namespaces:
         {}
       Queue Size: 100
       Value: true
-    - Alpha: 1
+    - Alpha: 0.9
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
         Max Value: 10
@@ -351,19 +326,19 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Class: rviz/PointCloud2
-      Color: 255; 255; 255
+      Color: 200; 255; 200
       Color Transformer: Intensity
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
-      Max Color: 255; 255; 255
-      Min Color: 0; 0; 0
-      Name: PointCloud2
+      Max Color: 255; 200; 100
+      Min Color: 100; 200; 255
+      Name: Local Cloud
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 3
-      Size (m): 0.05000000074505806
+      Size (Pixels): 2
+      Size (m): 0.04
       Style: Flat Squares
       Topic: /local_cloud
       Unreliable: false
@@ -372,7 +347,7 @@ Visualization Manager:
       Value: true
   Enabled: true
   Global Options:
-    Background Color: 48; 48; 48
+    Background Color: 30; 30; 35
     Default Light: true
     Fixed Frame: map
     Frame Rate: 30

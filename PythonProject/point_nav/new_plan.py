@@ -16,10 +16,6 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from geometry_msgs.msg import Twist
 
-# 添加SDK路径以导入G1ActionPlayer
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unitree_sdk2_python/example/g1/high_level/"))
-from g1_action_player import G1ActionPlayer
-
 class NavigationState(Enum):
     """导航状态枚举"""
     IDLE = "idle"
@@ -48,9 +44,13 @@ class SimpleNavWaypointPlayer:
             rospy.logerr(
                 f"Dance type '{dance_type}' not defined, using default choreography"
             )
-            self.dance_sequence = list(dance_choreography.values())[0]
+            dance_config = list(dance_choreography.values())[0]
         else:
-            self.dance_sequence = dance_choreography[dance_type]
+            dance_config = dance_choreography[dance_type]
+
+        # Extract global time limit
+        self.global_time_limit = dance_config["global_time"]
+        self.dance_sequence = dance_config["waypoints"]
 
         # Extract dance positions and wait times
         dance_waypoints = [pos for pos, _ in self.dance_sequence]
@@ -67,6 +67,17 @@ class SimpleNavWaypointPlayer:
             f"总路径点数量: {len(self.waypoints)}，舞蹈点: {len(dance_waypoints)}，后台点: {backstage_pos}"
         )
         rospy.loginfo(f"完整路径点序列: {self.waypoints}")
+        
+        # 定义门口点位坐标（用于识别过渡点）
+        # 优化门口位置，使其更容易通过
+        self.doorway_pos = (-1.91, 1.35, 0)  # 更新为新的门口位置
+        
+        # 记录门口点位信息
+        doorway_count = sum(1 for i in range(len(self.waypoints)) if self.is_doorway_waypoint(i))
+        rospy.loginfo(f"门口过渡点数量: {doorway_count}")
+
+        # 智能路径优化：如果机器人能直接规划到后台，跳过过渡点
+        self.optimize_waypoints()
 
         # 到达检测由g1_control.py处理，这里不需要设置阈值
 
@@ -90,6 +101,11 @@ class SimpleNavWaypointPlayer:
 
         # 添加时间阈值 - 在一个点停留太久后自动前进
         self.waypoint_start_time = None
+        
+        # 全局时间管理
+        self.global_start_time = None
+        self.global_timer = None
+        self.force_return_triggered = False
         
         # 定时器管理
         self._timers = []
@@ -233,6 +249,96 @@ class SimpleNavWaypointPlayer:
         with self._lock:
             return self._state
     
+    def is_doorway_waypoint(self, waypoint_index):
+        """检查指定索引的路径点是否是门口点位"""
+        if waypoint_index >= len(self.waypoints):
+            return False
+        
+        x, y, theta = self.waypoints[waypoint_index]
+        # 检查坐标是否与门口点位匹配（允许小的误差）
+        return (abs(x - self.doorway_pos[0]) < 0.1 and 
+                abs(y - self.doorway_pos[1]) < 0.1)
+    
+    def is_current_doorway_waypoint(self):
+        """检查当前路径点是否是门口点位"""
+        return self.is_doorway_waypoint(self.current_waypoint_index)
+    
+    def optimize_waypoints(self):
+        """智能优化路径点，如果机器人能直接规划到后台就跳过过渡点"""
+        try:
+            # 检查是否有门口过渡点
+            doorway_indices = [i for i in range(len(self.waypoints)) if self.is_doorway_waypoint(i)]
+            
+            if not doorway_indices:
+                rospy.loginfo("没有门口过渡点，无需优化")
+                return
+            
+            # 检查是否可以直接从舞蹈点规划到后台点
+            dance_points = [i for i in range(len(self.waypoints)) if not self.is_doorway_waypoint(i) and i != len(self.waypoints) - 1]
+            backstage_index = len(self.waypoints) - 1
+            
+            if not dance_points:
+                rospy.loginfo("没有舞蹈点，无需优化")
+                return
+            
+            # 尝试从最后一个舞蹈点直接规划到后台点
+            last_dance_index = max(dance_points)
+            last_dance_pos = self.waypoints[last_dance_index]
+            backstage_pos = self.waypoints[backstage_index]
+            
+            rospy.loginfo(f"检查是否可以从舞蹈点 {last_dance_pos} 直接规划到后台点 {backstage_pos}")
+            
+            # 计算距离，如果距离很近，可能不需要过渡点
+            distance = math.sqrt((last_dance_pos[0] - backstage_pos[0])**2 + (last_dance_pos[1] - backstage_pos[1])**2)
+            rospy.loginfo(f"舞蹈点到后台点距离: {distance:.2f}米")
+            
+            # 如果距离小于3米，尝试跳过过渡点
+            if distance < 3.0:
+                rospy.loginfo("距离较近，尝试跳过门口过渡点...")
+                
+                # 创建优化后的路径点序列（移除门口过渡点）
+                optimized_waypoints = []
+                optimized_wait_times = []
+                
+                for i in range(len(self.waypoints)):
+                    if not self.is_doorway_waypoint(i):
+                        optimized_waypoints.append(self.waypoints[i])
+                        if i < len(self.wait_times):
+                            optimized_wait_times.append(self.wait_times[i])
+                        else:
+                            optimized_wait_times.append(0)
+                
+                # 更新路径点序列
+                self.waypoints = optimized_waypoints
+                self.wait_times = optimized_wait_times
+                
+                rospy.loginfo(f"路径优化完成，新路径点数量: {len(self.waypoints)}")
+                rospy.loginfo(f"优化后的路径点序列: {self.waypoints}")
+                
+                # 重新计算门口点数量
+                doorway_count = sum(1 for i in range(len(self.waypoints)) if self.is_doorway_waypoint(i))
+                rospy.loginfo(f"优化后门口过渡点数量: {doorway_count}")
+            else:
+                rospy.loginfo(f"距离较远({distance:.2f}米)，保留门口过渡点")
+                
+        except Exception as e:
+            rospy.logwarn(f"路径优化失败: {e}")
+            # 如果优化失败，保持原始路径
+    
+    def get_waypoint_description(self, waypoint_index):
+        """获取路径点的描述信息"""
+        if waypoint_index >= len(self.waypoints):
+            return "无效路径点"
+        
+        if waypoint_index == len(self.waypoints) - 1:
+            return "[返回后台]"
+        elif waypoint_index == 0:
+            return f"[第一个舞蹈位置]"
+        elif self.is_doorway_waypoint(waypoint_index):
+            return "[门口过渡点]"
+        else:
+            return f"[舞蹈位置 {waypoint_index+1}]"
+    
     def cleanup(self):
         """清理资源"""
         rospy.loginfo("开始清理资源...")
@@ -270,6 +376,18 @@ class SimpleNavWaypointPlayer:
     def get_status_info(self):
         """获取当前状态信息，用于调试和监控"""
         with self._lock:
+            # 计算全局时间信息
+            global_time_info = {}
+            if self.global_start_time is not None:
+                elapsed_time = (rospy.Time.now() - self.global_start_time).to_sec()
+                remaining_time = self.global_time_limit - elapsed_time
+                global_time_info = {
+                    "global_elapsed": elapsed_time,
+                    "global_remaining": remaining_time,
+                    "global_limit": self.global_time_limit,
+                    "force_return_triggered": self.force_return_triggered
+                }
+            
             return {
                 "state": self._state.value,
                 "current_waypoint": self.current_waypoint_index,
@@ -278,7 +396,8 @@ class SimpleNavWaypointPlayer:
                 "dance_service_called": self.dance_service_called,
                 "reached_final": self.reached_final,
                 "active_timers": len(self._timers),
-                "active_threads": len([t for t in self._threads if t.is_alive()])
+                "active_threads": len([t for t in self._threads if t.is_alive()]),
+                **global_time_info
             }
     
     def log_status_info(self, event):
@@ -324,9 +443,17 @@ class SimpleNavWaypointPlayer:
         rospy.loginfo(f"到达路径点 {self.current_waypoint_index+1}")
         rospy.loginfo(f"当前航点索引: {self.current_waypoint_index}, 舞蹈服务已调用: {self.dance_service_called}")
         
+        # 检查是否是门口过渡点
+        if self.is_current_doorway_waypoint():
+            rospy.loginfo("到达门口过渡点，短暂停留后继续")
+            self.set_state(NavigationState.WAITING)
+            # 门口点位等待时间很短，直接继续
+            self.schedule_next_waypoint()
         # 对于第一个点，需要开始舞蹈
-        if self.current_waypoint_index == 0 and not self.dance_service_called:
+        elif self.current_waypoint_index == 0 and not self.dance_service_called:
             rospy.loginfo("到达第一个点，开始执行舞蹈")
+            # 启动全局时间计时器
+            self.start_global_timer()
             self.set_state(NavigationState.WAITING)
             self.perform_dance()
         else:
@@ -441,10 +568,14 @@ class SimpleNavWaypointPlayer:
             
             # 如果发布航点后超过45秒还没到达，认为卡住了
             if total_time > 45.0:
+                # 检查是否是门口过渡点
+                if self.is_current_doorway_waypoint():
+                    rospy.logwarn(f"[超时] 门口过渡点导航超过{total_time:.1f}秒，继续尝试...")
+                    # 重新发布门口过渡点目标
+                    rospy.loginfo("重新发布门口过渡点目标...")
+                    self.navigate_to_current_waypoint(is_retry=True)
                 # 检查是否是最后一个航点
-                is_last_waypoint = (self.current_waypoint_index == len(self.waypoints) - 1)
-                
-                if is_last_waypoint:
+                elif self.current_waypoint_index == len(self.waypoints) - 1:
                     rospy.logwarn(f"[超时] 在最后一个路径点导航超过{total_time:.1f}秒，继续尝试...")
                     # 重新发布最后一个航点目标
                     rospy.loginfo("重新发布最后一个航点目标...")
@@ -476,6 +607,168 @@ class SimpleNavWaypointPlayer:
         goal.goal.target_pose.pose.orientation.w = q[3]
         return goal
 
+    def _optimize_planner_for_doorway(self):
+        """为门口点位优化规划器参数"""
+        try:
+            import rospy
+            from dynamic_reconfigure.client import Client
+            
+            # 创建动态重配置客户端
+            client = Client("/move_base/TebLocalPlannerROS", timeout=5.0)
+            
+            # 为门口点位设置更宽松的参数
+            doorway_params = {
+                'xy_goal_tolerance': 0.3,  # 增加目标容差
+                'yaw_goal_tolerance': 0.3,  # 增加角度容差
+                'min_obstacle_dist': 0.05,  # 减少最小障碍物距离
+                'inflation_dist': 0.1,     # 减少膨胀距离
+                'weight_obstacle': 20,      # 减少障碍物权重
+                'weight_inflation': 0.05,   # 减少膨胀权重
+                'max_vel_x': 1.5,           # 降低最大速度
+                'max_vel_theta': 0.8,       # 降低最大角速度
+                'acc_lim_x': 0.8,          # 降低加速度限制
+                'acc_lim_theta': 0.8,      # 降低角加速度限制
+                'enable_homotopy_class_planning': True,  # 启用同伦类规划
+                'max_number_classes': 6,   # 增加同伦类数量
+                'selection_cost_hysteresis': 0.5,  # 减少成本滞后
+                'roadmap_graph_no_samples': 20,    # 增加采样点
+                'roadmap_graph_area_width': 8,    # 增加规划区域宽度
+            }
+            
+            rospy.loginfo("为门口点位应用优化参数...")
+            client.update_configuration(doorway_params)
+            rospy.loginfo("门口点位参数优化完成")
+            
+        except Exception as e:
+            rospy.logwarn(f"门口点位参数优化失败: {e}")
+            # 如果动态重配置失败，继续使用默认参数
+
+    def _restore_default_planner_params(self):
+        """恢复默认规划器参数"""
+        try:
+            import rospy
+            from dynamic_reconfigure.client import Client
+            
+            # 恢复默认参数
+            default_params = {
+                'xy_goal_tolerance': 0.2,
+                'yaw_goal_tolerance': 0.15,
+                'min_obstacle_dist': 0.1,
+                'inflation_dist': 0.2,
+                'weight_obstacle': 50,
+                'weight_inflation': 0.1,
+                'max_vel_x': 3.0,
+                'max_vel_theta': 1.0,
+                'acc_lim_x': 1.0,
+                'acc_lim_theta': 1.0,
+                'enable_homotopy_class_planning': True,
+                'max_number_classes': 4,
+                'selection_cost_hysteresis': 1.0,
+                'roadmap_graph_no_samples': 15,
+                'roadmap_graph_area_width': 5,
+            }
+            
+            rospy.loginfo("恢复默认规划器参数...")
+            client = Client("/move_base/TebLocalPlannerROS", timeout=5.0)
+            client.update_configuration(default_params)
+            rospy.loginfo("默认参数恢复完成")
+            
+        except Exception as e:
+            rospy.logwarn(f"恢复默认参数失败: {e}")
+
+    def start_global_timer(self):
+        """启动全局时间计时器"""
+        if self.global_start_time is None:
+            self.global_start_time = rospy.Time.now()
+            rospy.loginfo(f"开始全局时间计时，限制时间: {self.global_time_limit}秒")
+            
+            # 设置全局时间检查定时器
+            self.global_timer = rospy.Timer(
+                rospy.Duration(1.0), self.check_global_time, oneshot=False
+            )
+            self._timers.append(self.global_timer)
+
+    def check_global_time(self, event):
+        """检查全局时间是否超时"""
+        if self.global_start_time is None:
+            return
+            
+        elapsed_time = (rospy.Time.now() - self.global_start_time).to_sec()
+        remaining_time = self.global_time_limit - elapsed_time
+        
+        # 每10秒记录一次剩余时间
+        if int(elapsed_time) % 10 == 0:
+            rospy.loginfo(f"[全局时间] 已用时: {elapsed_time:.1f}秒, 剩余: {remaining_time:.1f}秒")
+        
+        # 如果超时，强制返回后台
+        if elapsed_time >= self.global_time_limit and not self.force_return_triggered:
+            rospy.logwarn(f"[全局时间超时] 已用时 {elapsed_time:.1f}秒，超过限制 {self.global_time_limit}秒，强制返回后台！")
+            self.force_return_to_backstage()
+
+    def force_return_to_backstage(self):
+        """强制返回后台点"""
+        with self._lock:
+            if self.force_return_triggered:
+                return
+                
+            self.force_return_triggered = True
+            rospy.logwarn("触发强制返回后台逻辑...")
+            
+            # 取消当前所有目标
+            try:
+                cancel_msg = GoalID()
+                self.cancel_pub.publish(cancel_msg)
+                rospy.sleep(0.2)
+            except Exception as e:
+                rospy.logwarn(f"取消目标失败: {e}")
+            
+            # 停止所有定时器
+            for timer in self._timers:
+                try:
+                    timer.shutdown()
+                except Exception as e:
+                    rospy.logwarn(f"定时器关闭失败: {e}")
+            
+            # 直接导航到后台点
+            backstage_pos = (-0.6, 0, 0)
+            rospy.logwarn(f"强制导航到后台点: {backstage_pos}")
+            
+            # 发布后台点目标
+            goal_msg = self._build_move_base_goal(backstage_pos[0], backstage_pos[1], backstage_pos[2])
+            self.goal_pub.publish(goal_msg)
+            
+            # 设置状态为强制返回
+            self.set_state(NavigationState.NAVIGATING)
+            self.current_waypoint_index = len(self.waypoints) - 1  # 设置为最后一个点
+            
+            # 设置一个较短的超时检测，确保能到达后台
+            self.plan_failure_timer = rospy.Timer(
+                rospy.Duration(30.0), self.check_force_return_success, oneshot=True
+            )
+            self._timers.append(self.plan_failure_timer)
+
+    def check_force_return_success(self, event):
+        """检查强制返回是否成功"""
+        current_state = self.get_state()
+        if current_state == NavigationState.NAVIGATING:
+            # 检查是否到达后台点
+            dx = self.current_position["x"] - (-0.6)
+            dy = self.current_position["y"] - 0.0
+            distance = math.sqrt(dx*dx + dy*dy)
+            
+            if distance < 0.3:  # 如果距离后台点小于0.3米
+                rospy.loginfo("强制返回成功，已到达后台点")
+                self.set_state(NavigationState.COMPLETED)
+                rospy.loginfo("全局时间超时，任务强制完成")
+                rospy.signal_shutdown("全局时间超时完成")
+                import sys
+                sys.exit(0)
+            else:
+                rospy.logwarn(f"强制返回超时，距离后台点还有 {distance:.2f}米，继续尝试...")
+                # 重新发布后台点目标
+                goal_msg = self._build_move_base_goal(-0.6, 0.0, 0.0)
+                self.goal_pub.publish(goal_msg)
+
     def navigate_to_current_waypoint(self, is_retry=False):
         """Navigate to the current waypoint with error handling"""
         with self._lock:
@@ -504,13 +797,8 @@ class SimpleNavWaypointPlayer:
             # Get current waypoint
             x, y, theta = self.waypoints[self.current_waypoint_index]
 
-            # Determine location description
-            if self.current_waypoint_index == len(self.waypoints) - 1:
-                location_desc = "[返回后台]"
-            elif self.current_waypoint_index == 0:
-                location_desc = f"[第一个舞蹈位置]"
-            else:
-                location_desc = f"[舞蹈位置 {self.current_waypoint_index+1}]"
+            # Determine location description using the helper method
+            location_desc = self.get_waypoint_description(self.current_waypoint_index)
 
             wait_time = (
                 self.wait_times[self.current_waypoint_index]
@@ -529,18 +817,26 @@ class SimpleNavWaypointPlayer:
             self.last_position_check["y"] = self.current_position["y"]
             self.last_position_check["time"] = rospy.Time.now()
 
+            # 为门口点位添加特殊处理
+            if self.is_current_doorway_waypoint():
+                rospy.loginfo("门口过渡点：应用特殊路径规划策略")
+                # 尝试调整规划器参数以提高成功率
+                self._optimize_planner_for_doorway()
+            
             # Publish MoveBaseActionGoal
             goal_msg = self._build_move_base_goal(x, y, theta)
             rospy.loginfo(f"发布导航目标: x={x}, y={y}, theta={theta}")
+            
             self.goal_pub.publish(goal_msg)
             self.last_goal_send_time = rospy.Time.now()
             self.set_state(NavigationState.NAVIGATING)
             self.waypoint_start_time = rospy.Time.now()  # 重置路径点计时器
             rospy.loginfo("导航目标已发布，等待路径规划...")
             
-            # 添加路径规划失败检测定时器
+            # 为门口点位使用更长的检测时间
+            detection_time = 8.0 if self.is_current_doorway_waypoint() else 5.0
             self.plan_failure_timer = rospy.Timer(
-                rospy.Duration(5.0), self.check_plan_failure, oneshot=True
+                rospy.Duration(detection_time), self.check_plan_failure, oneshot=True
             )
             self._timers.append(self.plan_failure_timer)
 
@@ -552,24 +848,154 @@ class SimpleNavWaypointPlayer:
             current_time = rospy.Time.now()
             time_since_start = (current_time - self.waypoint_start_time).to_sec()
             
-            if time_since_start > 5.0:  # 5秒后检查
+            # 为门口点位使用更长的检测时间
+            detection_threshold = 8.0 if self.is_current_doorway_waypoint() else 5.0
+            
+            if time_since_start > detection_threshold:
                 # 检查机器人是否移动了
                 dx = self.current_position["x"] - self.last_position_check["x"]
                 dy = self.current_position["y"] - self.last_position_check["y"]
                 dist_moved = math.hypot(dx, dy)
                 
                 if dist_moved < 0.1:  # 如果几乎没有移动
+                    # 检查是否是门口过渡点
+                    if self.is_current_doorway_waypoint():
+                        rospy.logwarn(f"[路径规划失败] 门口过渡点{detection_threshold}秒内只移动了{dist_moved:.3f}米，尝试备用策略...")
+                        # 尝试备用门口点位
+                        self._try_alternative_doorway_approach()
                     # 检查是否是最后一个航点（后台点）
-                    is_last_waypoint = (self.current_waypoint_index == len(self.waypoints) - 1)
-                    
-                    if is_last_waypoint:
-                        rospy.logwarn(f"[路径规划失败] 机器人5秒内只移动了{dist_moved:.3f}米，但这是最后一个航点，继续尝试...")
+                    elif self.current_waypoint_index == len(self.waypoints) - 1:
+                        rospy.logwarn(f"[路径规划失败] 机器人{detection_threshold}秒内只移动了{dist_moved:.3f}米，但这是最后一个航点，继续尝试...")
                         # 对于最后一个点，重新发布目标而不是跳过
                         rospy.loginfo("重新发布最后一个航点目标...")
                         self.navigate_to_current_waypoint(is_retry=True)
                     else:
-                        rospy.logwarn(f"[路径规划失败] 机器人5秒内只移动了{dist_moved:.3f}米，跳过当前点")
+                        rospy.logwarn(f"[路径规划失败] 机器人{detection_threshold}秒内只移动了{dist_moved:.3f}米，跳过当前点")
                         self.force_move_to_next_waypoint()
+
+    def _try_alternative_doorway_approach(self):
+        """尝试备用门口点位策略"""
+        try:
+            rospy.loginfo("尝试备用门口点位策略...")
+            
+            # 策略1: 尝试更宽松的规划参数
+            self._apply_ultra_loose_params()
+            rospy.sleep(1.0)
+            self.navigate_to_current_waypoint(is_retry=True)
+            
+            # 设置一个较短的检测时间，如果还是失败就尝试策略2
+            self.plan_failure_timer = rospy.Timer(
+                rospy.Duration(6.0), self._try_doorway_strategy_2, oneshot=True
+            )
+            self._timers.append(self.plan_failure_timer)
+            
+        except Exception as e:
+            rospy.logerr(f"备用门口策略1失败: {e}")
+            self._try_doorway_strategy_2(None)
+
+    def _apply_ultra_loose_params(self):
+        """应用超宽松的规划参数"""
+        try:
+            from dynamic_reconfigure.client import Client
+            client = Client("/move_base/TebLocalPlannerROS", timeout=3.0)
+            
+            ultra_loose_params = {
+                'xy_goal_tolerance': 0.5,      # 更大的目标容差
+                'yaw_goal_tolerance': 0.5,    # 更大的角度容差
+                'min_obstacle_dist': 0.02,     # 极小的障碍物距离
+                'inflation_dist': 0.05,         # 极小的膨胀距离
+                'weight_obstacle': 5,          # 极小的障碍物权重
+                'weight_inflation': 0.01,      # 极小的膨胀权重
+                'max_vel_x': 0.8,              # 很慢的速度
+                'max_vel_theta': 0.5,          # 很慢的角速度
+                'enable_homotopy_class_planning': True,
+                'max_number_classes': 8,       # 更多同伦类
+                'roadmap_graph_no_samples': 30, # 更多采样点
+                'roadmap_graph_area_width': 12, # 更大的规划区域
+            }
+            
+            rospy.loginfo("应用超宽松规划参数...")
+            client.update_configuration(ultra_loose_params)
+            
+        except Exception as e:
+            rospy.logwarn(f"应用超宽松参数失败: {e}")
+
+    def _try_doorway_strategy_2(self, event):
+        """门口点位策略2: 尝试不同的门口位置"""
+        try:
+            rospy.loginfo("尝试门口点位策略2: 使用备用门口位置...")
+            
+            # 定义备用门口位置（稍微偏移）
+            original_waypoint = self.waypoints[self.current_waypoint_index]
+            x, y, theta = original_waypoint
+            
+            # 尝试几个备用位置
+            alternative_positions = [
+                (x + 0.1, y, theta),      # 稍微向右
+                (x - 0.1, y, theta),      # 稍微向左
+                (x, y + 0.1, theta),      # 稍微向前
+                (x, y - 0.1, theta),      # 稍微向后
+                (x + 0.2, y, theta),      # 更向右
+            ]
+            
+            for i, (alt_x, alt_y, alt_theta) in enumerate(alternative_positions):
+                rospy.loginfo(f"尝试备用门口位置 {i+1}: ({alt_x}, {alt_y}, {alt_theta})")
+                
+                # 临时修改当前航点
+                self.waypoints[self.current_waypoint_index] = (alt_x, alt_y, alt_theta)
+                
+                # 恢复默认参数
+                self._restore_default_planner_params()
+                rospy.sleep(0.5)
+                
+                # 尝试导航到备用位置
+                self.navigate_to_current_waypoint(is_retry=True)
+                
+                # 设置检测时间
+                self.plan_failure_timer = rospy.Timer(
+                    rospy.Duration(4.0), self._check_alternative_success, oneshot=True
+                )
+                self._timers.append(self.plan_failure_timer)
+                return  # 只尝试第一个备用位置，如果失败会继续
+                
+        except Exception as e:
+            rospy.logerr(f"门口策略2失败: {e}")
+            self._try_doorway_strategy_3()
+
+    def _check_alternative_success(self, event):
+        """检查备用位置是否成功"""
+        current_state = self.get_state()
+        if current_state == NavigationState.NAVIGATING:
+            # 检查是否移动了
+            dx = self.current_position["x"] - self.last_position_check["x"]
+            dy = self.current_position["y"] - self.last_position_check["y"]
+            dist_moved = math.hypot(dx, dy)
+            
+            if dist_moved < 0.1:
+                rospy.logwarn("备用门口位置也失败，尝试策略3...")
+                self._try_doorway_strategy_3()
+            else:
+                rospy.loginfo("备用门口位置成功，继续导航...")
+
+    def _try_doorway_strategy_3(self):
+        """门口点位策略3: 直接跳过门口点，尝试下一个点"""
+        try:
+            rospy.logwarn("门口点位策略3: 直接跳过门口过渡点...")
+            
+            # 恢复原始门口位置
+            self.waypoints[self.current_waypoint_index] = (-1.91, 1.35, 0)
+            
+            # 恢复默认参数
+            self._restore_default_planner_params()
+            
+            # 直接跳过门口点
+            rospy.loginfo("跳过门口过渡点，直接前往下一个航点...")
+            self.force_move_to_next_waypoint()
+            
+        except Exception as e:
+            rospy.logerr(f"门口策略3失败: {e}")
+            # 最后的备用方案：强制跳过
+            self.force_move_to_next_waypoint()
 
     def perform_dance(self):
         """
@@ -674,20 +1100,14 @@ class SimpleNavWaypointPlayer:
 
     def schedule_next_waypoint(self):
         """Schedule movement to next waypoint after waiting period"""
-        # 减少等待时间，确保不间断移动
-      #   wait_time = min(
-      #       5.0,
-      #       (
-      #           self.wait_times[self.current_waypoint_index]
-      #           if self.current_waypoint_index < len(self.wait_times)
-      #           else 0
-      #       ),
-      #   )
-      #           self.wait_times[self.current_waypoint_index]
-      
-      
-        wait_time=self.wait_times[self.current_waypoint_index]
+        # 获取等待时间，确保不为0
+        wait_time = self.wait_times[self.current_waypoint_index] if self.current_waypoint_index < len(self.wait_times) else 0
         
+        # 如果等待时间为0，直接继续到下一个路径点
+        if wait_time <= 0:
+            rospy.loginfo("等待时间为0，直接继续到下一个路径点")
+            self.continue_to_next_waypoint()
+            return
         
         # If we have an existing timer, cancel it
         if self.dance_timer:
@@ -705,6 +1125,11 @@ class SimpleNavWaypointPlayer:
         rospy.loginfo("等待时间结束，继续前往下一个路径点")
 
         with self._lock:
+            # 如果刚完成门口点位，恢复默认参数
+            if self.current_waypoint_index > 0 and self.is_doorway_waypoint(self.current_waypoint_index - 1):
+                rospy.loginfo("门口点位完成，恢复默认规划器参数...")
+                self._restore_default_planner_params()
+            
             self.set_state(NavigationState.IDLE)
             self.current_waypoint_index += 1
             rospy.loginfo(f"[调试] 前进到下一个航点，当前索引: {self.current_waypoint_index}, 总航点数: {len(self.waypoints)}")
@@ -765,48 +1190,75 @@ if __name__ == "__main__":
     backstage_pos = (-0.6, 0, 0)
 
     dance_choreography = {
-       #祖国的好山河
-        "A": [
-            ((-2.2, 3.0, 170), 30.0),
-            ((-2.6, 3.4, 180), 40.0),
-            ((-3.0, 3.4, -170), 20.0),
-            ((-0.6, 0, 0), 0),
-        ],
-        #沙家浜总有一天
-        "B": [
-            ((-2.1, 3.4, 170), 20.0),
-            ((-2.3, 3.4, 180), 40.0),
-            ((-2.6, 3.4, -170), 20.0),
-            ((-2.8, 3.4, 180), 12.5),
-            ((-0.6, 0, 0), 0),
-        ],
-         #军民鱼水情
-        "X": [
-            ((-2.4, 2.6, 172), 60.0),
-            ((-2.7, 3.2, 160), 50.0),
-            ((-2.7, 3.5, 160), 63.5),
-            ((-3.1, 3.4, 180), 60.5),
-            ((-0.6, 0, 0), 0),
-        ],
-        #智斗
-        "Y": [
-            ((-2.2, 3.4, 170), 50.0),
-            ((-2.5, 3.4, 180), 40.0),
-            ((-2.8, 3.4, -170), 50.0),
-            ((-0.6, 0, 0), 0),
-        ],
-        # 上台
-        "Up": [
-            ((-2.6, 3.4, 170), 30.0),
-            ((-0.6, 0, 0), 0),
-            
-        ],
+       #祖国的好山河 - 全局时间90秒
+        "A": {
+            "global_time": 90.0,
+            "waypoints": [
+                ((-2.2, 3.0, 170), 30.0),
+                ((-2.6, 3.4, 180), 40.0),
+                ((-3.0, 3.4, -170), 20.0),
+                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
+                ((-0.6, 0, 0), 0),
+            ]
+        },
+        #沙家浜总有一天 - 全局时间92.5秒
+        "B": {
+            "global_time": 92.5,
+            "waypoints": [
+                ((-2.1, 3.4, 170), 20.0),
+                ((-2.3, 3.4, 180), 40.0),
+                ((-2.6, 3.4, -170), 20.0),
+                ((-2.8, 3.4, 180), 12.5),
+                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
+                ((-0.6, 0, 0), 0),
+            ]
+        },
+         #军民鱼水情 - 全局时间234秒
+        "X": {
+            "global_time": 234.0,
+            "waypoints": [
+                ((-2.4, 2.6, 172), 60.0),
+                ((-2.7, 3.2, 160), 50.0),
+                ((-2.7, 3.5, 160), 63.5),
+                ((-3.1, 3.4, 180), 60.5),
+                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
+                ((-0.6, 0, 0), 0),
+            ]
+        },
+        #智斗 - 全局时间420秒
+        "Y": {
+            "global_time": 420.0,
+            "waypoints": [
+                ((-2.2, 3.0, 170), 60.0),
+                ((-2.8, 3.4, 180), 60.0),
+                ((-2.2, 3.0, -170),60.0),
+                ((-2.8, 3.4, 170), 60.0),
+                ((-2.2, 3.0, 180), 60.0),
+                ((-2.2, 3.4, -170),60.0),
+                ((-3.0, 3.0, 170), 60.0),
+                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
+                ((-0.6, 0, 0), 0),
+            ]
+        },
+        # 上台 - 全局时间30秒
+        "Up": {
+            "global_time": 30.0,
+            "waypoints": [
+                ((-2.6, 3.4, 170), 30.0),
+                ((-1.8,1.9, -40), 0),    # 门口点位，中间过渡点
+                ((-0.6, 0, 0), 0),
+            ]
+        },
         
-        #下台
-         "Down": [
-            ((-2.6, 3.4, 170), 30.0),
-            ((-0.6, 0, 0), 0),
-        ],
+        #下台 - 全局时间30秒
+         "Down": {
+            "global_time": 30.0,
+            "waypoints": [
+                ((-2.6, 3.4, 170), 30.0),
+                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
+                ((-0.6, 0, 0), 0),
+            ]
+        },
     }
     # 所有模式都使用导航舞蹈逻辑，包括Up和Down
     node = SimpleNavWaypointPlayer(

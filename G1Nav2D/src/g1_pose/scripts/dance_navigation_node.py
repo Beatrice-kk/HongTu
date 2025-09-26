@@ -16,7 +16,7 @@ from config_loader import DanceConfigLoader
 
 # 导入原有的导航类（稍后重构）
 sys.path.insert(0, os.path.join(os.path.dirname(current_dir), ".."))
-from simplified_nav_dance import SimpleNavWaypointPlayer
+from new_plan import SimpleNavWaypointPlayer
 
 
 class DanceNavigationNode:
