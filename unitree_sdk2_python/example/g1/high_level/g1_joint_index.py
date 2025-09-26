@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-G1»úÆ÷ÈË¹Ø½ÚË÷Òı³£Á¿¶¨Òå
+G1æœºå™¨äººå…³èŠ‚ç´¢å¼•å¸¸é‡å®šä¹‰
 """
 
 class G1JointIndex:
-    """G1»úÆ÷ÈË¹Ø½ÚË÷Òı³£Á¿"""
+    """G1æœºå™¨äººå…³èŠ‚ç´¢å¼•å¸¸é‡"""
     WaistYaw = 12
     LeftShoulderPitch = 15
     LeftShoulderRoll = 16

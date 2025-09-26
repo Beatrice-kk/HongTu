@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-G1»úÆ÷ÈËÒ£¿ØÆ÷½âÎöÄ£¿é
+G1æœºå™¨äººé¥æ§å™¨è§£ææ¨¡å—
 """
 
 class RemoteController:
-    """G1»úÆ÷ÈËÒ£¿ØÆ÷½âÎöÀà"""
+    """G1æœºå™¨äººé¥æ§å™¨è§£æç±»"""
     
     def __init__(self):
         self.L1 = 0
@@ -24,17 +24,17 @@ class RemoteController:
         self.F1 = 0
         self.Start = 0
         self.Select = 0
-        # Ìí¼Ó°´¼ü×´Ì¬µÄÉÏÒ»´ÎÖµ£¬ÓÃÓÚ¼ì²â±ä»¯
+        # æ·»åŠ æŒ‰é”®çŠ¶æ€çš„ä¸Šä¸€æ¬¡å€¼ï¼Œç”¨äºæ£€æµ‹å˜åŒ–
         self._last_values = {}
 
     def parse(self, data):
         """
-        ¸ù¾İxKeySwitchUnion½á¹¹½âÎö°´¼ü
+        æ ¹æ®xKeySwitchUnionç»“æ„è§£ææŒ‰é”®
         
         Args:
-            data: Ò£¿ØÆ÷Êı¾İ×Ö½ÚÊı×é
+            data: é¥æ§å™¨æ•°æ®å­—èŠ‚æ•°ç»„
         """
-        # µÚÒ»¸ö×Ö½Ú [2] °üº¬ R1, L1, start, select, R2, L2, F1, F2
+        # ç¬¬ä¸€ä¸ªå­—èŠ‚ [2] åŒ…å« R1, L1, start, select, R2, L2, F1, F2
         self.R1 = (data[2] >> 0) & 1
         self.L1 = (data[2] >> 1) & 1
         self.Start = (data[2] >> 2) & 1
@@ -44,7 +44,7 @@ class RemoteController:
         self.F1 = (data[2] >> 6) & 1
         # F2 = (data[2] >> 7) & 1
         
-        # µÚ¶ş¸ö×Ö½Ú [3] °üº¬ A, B, X, Y, up, right, down, left
+        # ç¬¬äºŒä¸ªå­—èŠ‚ [3] åŒ…å« A, B, X, Y, up, right, down, left
         self.A = (data[3] >> 0) & 1
         self.B = (data[3] >> 1) & 1
         self.X = (data[3] >> 2) & 1
@@ -56,13 +56,13 @@ class RemoteController:
     
     def is_pressed_once(self, key_name):
         """
-        ¼ì²é°´¼üÊÇ·ñÊÇ¸Õ¸Õ°´ÏÂµÄ£¨°´¼ü±ßÔµ¼ì²â£©
+        æ£€æŸ¥æŒ‰é”®æ˜¯å¦æ˜¯åˆšåˆšæŒ‰ä¸‹çš„ï¼ˆæŒ‰é”®è¾¹ç¼˜æ£€æµ‹ï¼‰
         
         Args:
-            key_name: °´¼üÃû³Æ
+            key_name: æŒ‰é”®åç§°
             
         Returns:
-            bool: Èç¹û°´¼üÊÇ¸Õ¸Õ°´ÏÂµÄ·µ»ØTrue£¬·ñÔò·µ»ØFalse
+            bool: å¦‚æœæŒ‰é”®æ˜¯åˆšåˆšæŒ‰ä¸‹çš„è¿”å›Trueï¼Œå¦åˆ™è¿”å›False
         """
         current_value = getattr(self, key_name, 0)
         last_value = self._last_values.get(key_name, 0)
@@ -71,14 +71,14 @@ class RemoteController:
     
     def get_combo_once(self, key1, key2):
         """
-        ¼ì²é×éºÏ¼üÊÇ·ñÊÇ¸Õ¸Õ°´ÏÂµÄ
+        æ£€æŸ¥ç»„åˆé”®æ˜¯å¦æ˜¯åˆšåˆšæŒ‰ä¸‹çš„
         
         Args:
-            key1: µÚÒ»¸ö°´¼üÃû³Æ
-            key2: µÚ¶ş¸ö°´¼üÃû³Æ
+            key1: ç¬¬ä¸€ä¸ªæŒ‰é”®åç§°
+            key2: ç¬¬äºŒä¸ªæŒ‰é”®åç§°
             
         Returns:
-            bool: Èç¹û×éºÏ¼üÊÇ¸Õ¸Õ°´ÏÂµÄ·µ»ØTrue£¬·ñÔò·µ»ØFalse
+            bool: å¦‚æœç»„åˆé”®æ˜¯åˆšåˆšæŒ‰ä¸‹çš„è¿”å›Trueï¼Œå¦åˆ™è¿”å›False
         """
         current_pressed = getattr(self, key1, 0) and getattr(self, key2, 0)
         last_pressed = self._last_values.get(f"{key1}+{key2}", False)

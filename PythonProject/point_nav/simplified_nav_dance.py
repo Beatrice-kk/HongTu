@@ -62,9 +62,9 @@ class SimpleNavWaypointPlayer:
             f"总路径点数量: {len(self.waypoints)}，舞蹈点: {len(dance_waypoints)}，最后还会回到: {backstage_pos}"
         )
 
-        # 设置非常宽松的阈值，几乎保证能够到达
-        self.threshold = 2.0  # 将阈值放宽，确保能够更快地转向下一个点
-        self.threshold_yaw = 45.0  # 同样放宽角度阈值
+        # 设置精确的到达阈值，确保完全到达后再开始舞蹈
+        self.threshold = 0.3  # 距离阈值：0.3米内认为到达
+        self.threshold_yaw = 10.0  # 角度阈值：10度内认为到达
 
         # 使用状态机管理状态
         self._state = NavigationState.IDLE
@@ -111,6 +111,11 @@ class SimpleNavWaypointPlayer:
 
         # Add cmd_vel publisher to stop the robot
         self.cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
+        
+        # Subscribe to cmd_vel to monitor robot movement
+        self.cmd_vel_sub = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback)
+        self.current_velocity = {"linear": 0.0, "angular": 0.0}
+        self.last_velocity_check = rospy.Time.now()
 
         # Dance service client
         rospy.loginfo("Waiting for dance service...")
@@ -209,6 +214,28 @@ class SimpleNavWaypointPlayer:
     def status_callback(self, msg):
         """Monitor move_base status"""
         self.move_base_status = msg
+    
+    def cmd_vel_callback(self, msg):
+        """Monitor robot velocity to detect when it's stationary"""
+        self.current_velocity["linear"] = math.sqrt(
+            msg.linear.x**2 + msg.linear.y**2 + msg.linear.z**2
+        )
+        self.current_velocity["angular"] = math.sqrt(
+            msg.angular.x**2 + msg.angular.y**2 + msg.angular.z**2
+        )
+        self.last_velocity_check = rospy.Time.now()
+    
+    def is_robot_stationary(self, duration=2.0):
+        """检查机器人是否在指定时间内保持静止"""
+        time_since_last_vel = (rospy.Time.now() - self.last_velocity_check).to_sec()
+        if time_since_last_vel > 1.0:  # 如果超过1秒没有收到速度信息，认为静止
+            return True
+        
+        # 检查线速度和角速度是否都接近0
+        linear_speed = self.current_velocity["linear"]
+        angular_speed = self.current_velocity["angular"]
+        
+        return linear_speed < 0.05 and angular_speed < 0.05  # 速度阈值：0.05 m/s 和 0.05 rad/s
 
     def start_navigation_watchdog(self):
         """Start a timer to periodically check if navigation is progressing"""
@@ -225,14 +252,23 @@ class SimpleNavWaypointPlayer:
         if current_state in [NavigationState.DANCING, NavigationState.COMPLETED]:
             return
 
+        # 获取当前点的等待时间，如果超过等待时间+缓冲时间，才强制前进
+        current_wait_time = (
+            self.wait_times[self.current_waypoint_index]
+            if self.current_waypoint_index < len(self.wait_times)
+            else 0
+        )
+        # 等待时间 + 5秒缓冲时间
+        dynamic_timeout = current_wait_time + 5.0
+
         # 检查是否在同一个点停留了太长时间
         if (
             self.waypoint_start_time
             and (rospy.Time.now() - self.waypoint_start_time).to_sec()
-            > self.waypoint_timeout
+            > dynamic_timeout
         ):
             rospy.logwarn(
-                f"在路径点{self.current_waypoint_index+1}停留超过{self.waypoint_timeout}秒，强制前进到下一个点"
+                f"在路径点{self.current_waypoint_index+1}停留超过{dynamic_timeout}秒（等待时间{current_wait_time}秒+缓冲5秒），强制前进到下一个点"
             )
             self.force_move_to_next_waypoint()
 
@@ -316,6 +352,7 @@ class SimpleNavWaypointPlayer:
         self.last_position_check["time"] = current_time
 
         # 如果移动太少，强制前进到下一个点，而不是尝试重试
+        # 但只有在导航状态时才执行，避免在等待状态时被强制跳过
         if dist_moved < 0.03 and time_diff > 7.0:
             rospy.logwarn(
                 f"[卡住了] 机器人在{time_diff:.1f}秒内只移动了{dist_moved:.3f}米，尝试前进..."
@@ -462,15 +499,20 @@ class SimpleNavWaypointPlayer:
     def schedule_next_waypoint(self):
         """Schedule movement to next waypoint after waiting period"""
         # 减少等待时间，确保不间断移动
-        wait_time = min(
-            5.0,
-            (
-                self.wait_times[self.current_waypoint_index]
-                if self.current_waypoint_index < len(self.wait_times)
-                else 0
-            ),
-        )
-
+      #   wait_time = min(
+      #       5.0,
+      #       (
+      #           self.wait_times[self.current_waypoint_index]
+      #           if self.current_waypoint_index < len(self.wait_times)
+      #           else 0
+      #       ),
+      #   )
+      #           self.wait_times[self.current_waypoint_index]
+      
+      
+        wait_time=self.wait_times[self.current_waypoint_index]
+        
+        
         # If we have an existing timer, cancel it
         if self.dance_timer:
             self.dance_timer.shutdown()
@@ -537,17 +579,28 @@ class SimpleNavWaypointPlayer:
             f"[当前位置] ({current_pose.position.x:.2f}, {current_pose.position.y:.2f}) -> 距离目标: {dist:.2f} 米, 角度差: {d_yaw:.2f} 度",
         )
 
-        # 非常宽松的检查 - 只要大致接近目标就继续
-        if dist <= self.threshold and current_state == NavigationState.NAVIGATING:
-            rospy.loginfo(f"接近路径点 {self.current_waypoint_index+1}，继续前进")
-            self.set_state(NavigationState.WAITING)
+        # 精确的到达检查 - 必须同时满足距离、角度和静止要求
+        if (dist <= self.threshold and d_yaw <= self.threshold_yaw and 
+            current_state == NavigationState.NAVIGATING):
+            
+            # 对于第一个点（舞蹈点），需要额外检查机器人是否静止
+            if self.current_waypoint_index == 0:
+                if self.is_robot_stationary():
+                    rospy.loginfo(f"完全到达并静止在路径点 {self.current_waypoint_index+1} (距离:{dist:.2f}m, 角度差:{d_yaw:.1f}°)，开始舞蹈")
+                    self.set_state(NavigationState.WAITING)
+                else:
+                    rospy.loginfo_throttle(2, f"已到达路径点但仍在移动，等待静止... (线速度:{self.current_velocity['linear']:.3f}, 角速度:{self.current_velocity['angular']:.3f})")
+                    return
+            else:
+                rospy.loginfo(f"完全到达路径点 {self.current_waypoint_index+1} (距离:{dist:.2f}m, 角度差:{d_yaw:.1f}°)，开始等待")
+                self.set_state(NavigationState.WAITING)
 
-            # 只在第一个点执行舞蹈，其他点快速通过
+            # 只在第一个点执行舞蹈，其他点按等待时间停留
             if self.current_waypoint_index == 0 and not self.dance_service_called:
                 self.perform_dance()
             else:
-                # 其他点只短暂停留
-                self.force_move_to_next_waypoint()
+                # 其他点按指定等待时间停留
+                self.schedule_next_waypoint()
 
 
 def set_rotation(enable: bool):
@@ -571,7 +624,7 @@ if __name__ == "__main__":
         "--dance",
         type=str,
         default="A",
-        choices=["A", "B", "Up", "Down", "Left", "Right", "X", "Y"],
+        choices=["A", "B", "X", "Y"],
         help="Specify dance type to execute",
     )
     args, unknown = parser.parse_known_args()
@@ -582,9 +635,9 @@ if __name__ == "__main__":
 
     dance_choreography = {
         "A": [
-            ((-3.6, 3.4, 170), 30.0),
-            ((-3.4, 3.4, 180), 40.0),
-            ((-3.2, 3.4, -170), 20.0),
+            ((-2.6, 3.4, 170), 30.0),
+            ((-2.4, 3.4, 180), 40.0),
+            ((-2.2, 3.4, -170), 20.0),
             ((-0.6, 0, 0), 0),
         ],
         "B": [
@@ -609,11 +662,10 @@ if __name__ == "__main__":
             ((-3.2, 3.4, -170), 20.0),
             ((-0.6, 0, 0), 0),
         ],
-        "Q": [
+        "Down": [
             ((-3.6, 3.4, 170), 30.0),
-        ],
-        "H": [
             ((-0.6, 0, 0), 30.0),
+            
         ],
     }
 

@@ -18,7 +18,7 @@ TebLocalPlannerROS:
 
     # Robot
 
-    max_vel_x: 3.5
+    max_vel_x: 3
     max_vel_x_backwards: 0.5
     max_vel_y: 0.0
     max_vel_theta: 1.0
@@ -28,7 +28,7 @@ TebLocalPlannerROS:
 
     footprint_model: # types: "point", "circular", "two_circles", "line", "polygon"
         type: "circular"
-        radius: 0.2 # for type "circular"
+        radius: 0.3 # for type "circular"
         line_start: [0.0, 0.0] # for type "line"
         line_end: [0.2, 0.0] # for type "line"
         front_offset: 0.2 # for type "two_circles"
