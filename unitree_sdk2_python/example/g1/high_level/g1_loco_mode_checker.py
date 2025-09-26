@@ -33,14 +33,17 @@ class G1LocoModeChecker:
         """
         # 创建客户端
         self.loco_client = None
+        self._last_successful_mode = None  # 缓存最后一次成功的模式
+        self._consecutive_failures = 0  # 连续失败次数
+        self._max_consecutive_failures = 3  # 最大连续失败次数
         
         try:
             from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
             self.loco_client = LocoClient()
-            self.loco_client.SetTimeout(3.0)  # 设置超时时间
+            self.loco_client.SetTimeout(2.0)  # 减少超时时间到2秒
             self.loco_client.Init()
         except Exception as e:
-            print(f"??  初始化运控客户端失败: {e}")
+            print(f"⚠️ 初始化运控客户端失败: {e}")
     
     def GetFsmId(self):
         """
@@ -64,30 +67,40 @@ class G1LocoModeChecker:
                 return code, mode_id
             return code, 0
         except Exception as e:
-            print(f"? 调用GetFsmId API时出错: {e}")
+            print(f"⚠️ 调用GetFsmId API时出错: {e}")
             return -1, 0
     
     def is_in_main_loco_mode(self):
         """
-        检查机器人是否处于主运控模式
+        检查机器人是否处于主运控模式（带缓存和错误恢复机制）
         
         Returns:
             bool: 如果处于主运控模式返回True，否则返回False
         """
         if self.loco_client is None:
-            return False  # 如果无法检测，则返回False
+            # 如果客户端不可用，返回缓存的结果或默认值
+            return self._last_successful_mode if self._last_successful_mode is not None else False
+            
+        # 如果连续失败次数过多，使用缓存的结果
+        if self._consecutive_failures >= self._max_consecutive_failures:
+            if self._last_successful_mode is not None:
+                return self._last_successful_mode
+            else:
+                return False  # 如果没有任何缓存，返回False
             
         # 获取当前模式ID
         code, mode_id = self.GetFsmId()
         
         if code != 0:
+            self._consecutive_failures += 1
+            
             # 减少错误信息输出频率，只在必要时打印
             if not hasattr(self, '_last_error_time'):
                 self._last_error_time = 0
                 
             current_time = time.time()
-            # 每隔5秒以上才打印一次错误信息
-            if current_time - self._last_error_time > 5:
+            # 每隔10秒以上才打印一次错误信息
+            if current_time - self._last_error_time > 10:
                 error_messages = {
                     3102: "请求发送错误，可能是网络连接问题或服务不可用",
                     3103: "API未注册，请检查服务是否正常运行",
@@ -97,32 +110,37 @@ class G1LocoModeChecker:
                     3205: "请求被拒绝，可能需要更高权限"
                 }
                 error_desc = error_messages.get(code, "未知错误")
-                print(f"??  获取机器人模式失败，错误码: {code} ({error_desc})")
+                print(f"⚠️ 获取机器人模式失败，错误码: {code} ({error_desc})，连续失败: {self._consecutive_failures}")
                 self._last_error_time = current_time
-            return False
             
+            # 返回缓存的结果
+            return self._last_successful_mode if self._last_successful_mode is not None else False
+        
+        # 成功获取模式，重置失败计数
+        self._consecutive_failures = 0
+        
         # 检查是否为主运控模式
         is_main_loco = mode_id in self.MAIN_LOCO_MODES
         
+        # 缓存成功的结果
+        self._last_successful_mode = is_main_loco
+        
         # 只在模式发生变化时打印信息
         if not hasattr(self, '_last_mode_id') or self._last_mode_id != mode_id:
+            mode_names = {
+                0: "零力矩模式",
+                1: "阻尼模式", 
+                2: "位控下蹲",
+                3: "位控落座",
+                4: "锁定站立",
+                500: "常规运控",
+                501: "常规运控-3Dof-waist",
+                706: "平衡下蹲",
+                801: "走跑运控"
+            }
+            mode_name = mode_names.get(mode_id, f"未知模式({mode_id})")
+            status = "主运控模式" if is_main_loco else "非主运控模式"
+            print(f"🤖 机器人模式: {mode_name} ({mode_id}) - {status}")
             self._last_mode_id = mode_id
-            if is_main_loco:
-                mode_names = {
-                    self.MODE_STAND_UP: "常规运控（主运控）",
-                    self.MODE_STAND_3DOF: "常规运控-3Dof-waist",
-                    self.MODE_WALK_RUN: "走跑运控"
-                }
-                print(f"? 机器人处于主运控模式: {mode_names.get(mode_id, '未知主运控模式')}")
-            else:
-                mode_names = {
-                    self.MODE_ZERO_TORQUE: "零力矩模式",
-                    self.MODE_DAMP: "阻尼模式",
-                    self.MODE_SQUAT_POS: "位控下蹲",
-                    self.MODE_SIT_POS: "位控落座",
-                    self.MODE_STAND_LOCK: "锁定站立",
-                    self.MODE_BALANCE_SQUAT: "平衡下蹲"
-                }
-                print(f"? 机器人不处于主运控模式: {mode_names.get(mode_id, '其他模式')}")
             
         return is_main_loco

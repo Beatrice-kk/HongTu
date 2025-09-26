@@ -161,7 +161,11 @@ def main(return_remote=False):
                         while player.state != "stopped" and (time.time()-wait_t0) < 5.0:
                             time.sleep(0.1)
 
-                    player.play_action(direction, speed=1.0)
+                    ok = player.play_action(direction, speed=1.0)
+                    if not ok:
+                        resp.success = False
+                        resp.message = f"启动失败: {direction}"
+                        return resp
 
                     # 等待完成（最多120秒）
                     t0 = time.time()
@@ -251,8 +255,15 @@ def main(return_remote=False):
             # 解析遥控器数据
             remote.parse(msg.wireless_remote)
             
-            # 检查机器人是否处于主运控模式
-            player.in_main_loco_mode = loco_checker.is_in_main_loco_mode()
+            # 检查机器人是否处于主运控模式（降低检查频率）
+            current_time = time.time()
+            if not hasattr(lowstate_callback, '_last_mode_check_time'):
+                lowstate_callback._last_mode_check_time = 0
+            
+            # 每2秒检查一次模式状态，避免频繁网络请求
+            if current_time - lowstate_callback._last_mode_check_time > 2.0:
+                player.in_main_loco_mode = loco_checker.is_in_main_loco_mode()
+                lowstate_callback._last_mode_check_time = current_time
             
             # 功能激活检查
             if remote.get_combo_once('F1', 'Start'):
@@ -311,13 +322,21 @@ def main(return_remote=False):
                     print("? 检测到 L1 + F1，停止动作并回到初始姿态")
                     player.stop_play()
                 
+                # Start + L2: 关闭所有导航建图相关程序
+                if remote.get_combo_once('Start', 'L2'):
+                    print("? 检测到 Start + L2，关闭所有导航建图相关程序")
+                    try:
+                        player._shutdown_navigation_systems()
+                        if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                            player.audio_processor.audio_client.TtsMaker("已关闭所有导航程序", 0)
+                    except Exception as e:
+                        print(f"[shutdown] 关闭失败: {e}")
+                
                 # Start + L1: 启动 fastlio 导航
                 if remote.get_combo_once('Start', 'L1'):
                     print("? 检测到 Start + L1，启动 fastlio 导航")
                     try:
-                        player._start_fastlio_navigation()
-                        if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                            player.audio_processor.audio_client.TtsMaker("启动导航，十秒后可按方向键触发动作", 0)
+                        player._start_fastlio_navigation_with_monitoring()
                     except Exception as e:
                         print(f"[fastlio] 触发失败: {e}")
                 
@@ -385,6 +404,38 @@ def main(return_remote=False):
                     else:
                         print("? 导航启动时间不足10秒，请稍后再试")
                 
+                # Start + R1: 导航启动≥10秒后触发 simplified_nav_dance.py -Up
+                if remote.get_combo_once('Start', 'R1'):
+                    if player._can_trigger_after_nav():
+                        print("? 检测到 Start + R1，触发导航后动作Up")
+                        try:
+                            subprocess.Popen([
+                                "bash", "-lc",
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py -Up"
+                            ])
+                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                player.audio_processor.audio_client.TtsMaker("启动动作Up", 0)
+                        except Exception as e:
+                            print(f"[nav_dance] 启动失败: {e}")
+                    else:
+                        print("? 导航启动时间不足10秒，请稍后再试")
+                
+                # Start + R2: 导航启动≥10秒后触发 simplified_nav_dance.py -Down
+                if remote.get_combo_once('Start', 'R2'):
+                    if player._can_trigger_after_nav():
+                        print("? 检测到 Start + R2，触发导航后动作Down")
+                        try:
+                            subprocess.Popen([
+                                "bash", "-lc",
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/simplified_nav_dance.py -Down"
+                            ])
+                            if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
+                                player.audio_processor.audio_client.TtsMaker("启动动作Down", 0)
+                        except Exception as e:
+                            print(f"[nav_dance] 启动失败: {e}")
+                    else:
+                        print("? 导航启动时间不足10秒，请稍后再试")
+                
                 # 更新动作播放器
                 player.update()
             else:
@@ -425,6 +476,11 @@ def main(return_remote=False):
     if player.current_pose is None:
         player.current_pose = np.zeros(15, dtype=np.float32)
         print("? 使用默认零位姿态")
+    
+    # 程序启动后立即执行初始化到零位
+    print("? 开始初始化流程...")
+    player.init_to_zero_position()
+    print("? 初始化流程完成")
     
     print("? 程序初始化完成")
     print("? 功能当前未激活，请在机器人处于主运控模式时按 F1 + Start 激活功能")
