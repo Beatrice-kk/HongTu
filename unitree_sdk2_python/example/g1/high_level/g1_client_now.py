@@ -2308,6 +2308,15 @@ class G1ActionPlayer:
             return False
         return (time.time() - self._fastlio_started_at) >= wait_seconds
 
+    def _can_trigger_after_reloc(self) -> bool:
+        """
+        检查重定位是否成功。
+        返回 True 表示重定位成功，可以触发 new_plan。
+        """
+        # 主要依赖重定位状态检测，不依赖导航进程状态
+        # 因为用户可能单独启动了导航和重定位
+        return self._check_relocalization_status()
+
     def _monitor_relocalization(self):
         """监测重定位状态"""
         try:
@@ -3166,7 +3175,7 @@ def main(return_remote=False):
                 # Start + Up: 导航启动≥10秒后触发 new_plan.py -a
                 elif remote.get_combo_once('Start', 'Up'):
                     if player.function_activated:  # 只有功能激活后才能使用
-                        if player._can_trigger_after_nav(10.0):
+                        if player._can_trigger_after_reloc():
                             print("🎭 检测到 Start + Up，触发 new_plan.py")
                             try:
                                 # 先检查并关闭 new_plan 程序
@@ -3182,14 +3191,14 @@ def main(return_remote=False):
                             except Exception as e:
                                 print(f"[mock_dance] 启动失败: {e}")
                         else:
-                            print("[mock_dance] 导航未满10秒，忽略 Start+Up 触发")
+                            print("[mock_dance] 重定位未成功，忽略 Start+Up 触发")
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
 
                 # Start + Down: 导航启动≥10秒后触发 new_plan.py --dance "B"
                 elif remote.get_combo_once('Start', 'Down'):
                     if player.function_activated:  # 只有功能激活后才能使用
-                        if player._can_trigger_after_nav(10.0):
+                        if player._can_trigger_after_reloc():
                             print("🎭 检测到 Start + Down，触发 new_plan.py --dance.py")
                             try:
                                 # 先检查并关闭 new_plan 程序
@@ -3205,14 +3214,14 @@ def main(return_remote=False):
                             except Exception as e:
                                 print(f"[mock_dance] 启动失败: {e}")
                         else:
-                            print("[mock_dance] 导航未满10秒，忽略 Start+Down 触发")
+                            print("[mock_dance] 重定位未成功，忽略 Start+Down 触发")
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
                         
                 # Start + Right: 导航启动≥10秒后触发 new_plan.py
                 elif remote.get_combo_once('Start', 'Right'):
                     if player.function_activated:  # 只有功能激活后才能使用
-                        if player._can_trigger_after_nav(10.0):
+                        if player._can_trigger_after_reloc():
                             print("🎭 检测到 Start + Right，触发 new_plan.py")
                             try:
                                 # 先检查并关闭 new_plan 程序
@@ -3228,14 +3237,14 @@ def main(return_remote=False):
                             except Exception as e:
                                 print(f"[mock_dance] 启动失败: {e}")
                         else:
-                            print("[mock_dance] 导航未满10秒，忽略 Start+Right 触发")
+                            print("[mock_dance] 重定位未成功，忽略 Start+Right 触发")
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
                         
                 # Start + Left: 导航启动≥10秒后触发 new_plan.py
                 elif remote.get_combo_once('Start', 'Left'):
                     if player.function_activated:  # 只有功能激活后才能使用
-                        if player._can_trigger_after_nav(10.0):
+                        if player._can_trigger_after_reloc():
                             print("🎭 检测到 Start + Left，触发 new_plan.py")
                             try:
                                 # 先检查并关闭 new_plan 程序
@@ -3251,12 +3260,12 @@ def main(return_remote=False):
                             except Exception as e:
                                 print(f"[mock_dance] 启动失败: {e}")
                         else:
-                            print("[mock_dance] 导航未满10秒，忽略 Start+Left 触发")
+                            print("[mock_dance] 重定位未成功，忽略 Start+Left 触发")
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
                 # Start + R1: 去上台
                 elif remote.get_combo_once('Start', 'R1'):
-                    if player._can_trigger_after_nav(10.0):
+                    if player._can_trigger_after_reloc():
                         try:
                             # 先检查并关闭 new_plan 程序
                             player._check_and_kill_new_plan_processes()
@@ -3271,10 +3280,10 @@ def main(return_remote=False):
                         except Exception as e:
                             print(f"[mock_dance] 启动失败: {e}")
                     else:
-                        print("[mock_dance] 导航未满10秒，忽略 Start+R1 触发")
+                        print("[mock_dance] 重定位未成功，忽略 Start+R1 触发")
                  # Start + R2: 下台
                 elif remote.get_combo_once('Start', 'R2'):
-                    if player._can_trigger_after_nav(10.0):
+                    if player._can_trigger_after_reloc():
                         try:
                             # 先检查并关闭 new_plan 程序
                             player._check_and_kill_new_plan_processes()
@@ -3289,7 +3298,7 @@ def main(return_remote=False):
                         except Exception as e:
                             print(f"[mock_dance] 启动失败: {e}")
                     else:
-                        print("[mock_dance] 导航未满10秒，忽略 Start+R2 触发")
+                        print("[mock_dance] 重定位未成功，忽略 Start+R2 触发")
  
 
 
