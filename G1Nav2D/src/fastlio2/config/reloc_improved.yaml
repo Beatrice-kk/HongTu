@@ -1,0 +1,76 @@
+# 优化的自动重定位配置文件
+
+# 1. 地图设置
+map_pcd_path: "/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD/platform_1_5.pcd"
+
+# 2. 初始位置估计
+# 支持多个可能的起始位置
+initial_pose:
+  x: 0.0
+  y: 0.0
+  # 可选：添加多个候选位置
+  # alternative_poses:
+  #   - {x: -1.65, y: 0.0}
+  #   - {x: 1.0, y: 1.0}
+
+# 3. 自动朝向搜索参数
+yaw_search:
+  # 搜索范围（度）
+  range_deg: 180
+  
+  # 搜索步长（度）
+  # 建议值：15-30度，平衡精度和速度
+  step_deg: 20
+  
+  # 搜索策略
+  # "centered": 从0度开始双向搜索（默认）
+  # "clockwise": 顺时针搜索
+  # "counterclockwise": 逆时针搜索
+  strategy: "centered"
+
+# 4. 重定位参数
+reloc_params:
+  # 每次重定位尝试的等待时间（秒）
+  attempt_wait_time: 1.0
+  
+  # 状态检查次数
+  max_status_checks: 5
+  
+  # 状态检查间隔（秒）
+  status_check_interval: 1.0
+  
+  # 服务超时时间（秒）
+  service_timeout: 10.0
+
+# 5. 日志设置
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  
+  # 是否启用详细日志
+  verbose: true
+  
+  # 日志文件保留天数
+  retention_days: 7
+
+# 6. 错误处理
+error_handling:
+  # 最大重试次数
+  max_retries: 3
+  
+  # 重试间隔（秒）
+  retry_interval: 2.0
+  
+  # 是否在失败后尝试其他位置
+  try_alternative_poses: false
+
+# 7. 性能优化
+performance:
+  # 是否启用并行检查
+  parallel_checks: false
+  
+  # 内存使用限制（MB）
+  memory_limit: 512
+  
+  # CPU使用限制（百分比）
+  cpu_limit: 80
