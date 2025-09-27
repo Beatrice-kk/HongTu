@@ -1,4 +1,4 @@
-image: /home/unitree/HongTu/G1Nav2D/map_folder/platform_1_5.pgm
+image: /home/unitree/HongTu/G1Nav2D/map_folder/first_platform.pgm
 resolution: 0.050000
 origin: [-39.850001, -7.600000, 0.0]
 negate: 0

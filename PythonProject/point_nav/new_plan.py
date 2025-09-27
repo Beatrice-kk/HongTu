@@ -214,6 +214,22 @@ class SimpleNavWaypointPlayer:
 
         # 增加启动延迟，确保所有服务完全初始化
         rospy.sleep(2.0)
+        
+        # 对于Up/Down模式，强制重置服务状态
+        if self.dance_type in ["Up", "Down"]:
+            rospy.loginfo(f"重置{self.dance_type}模式服务状态...")
+            try:
+                # 尝试调用服务来重置状态
+                if self.dance_type == "Up" and self.play_up_service is not None:
+                    # 发送一个快速的重置请求
+                    rospy.loginfo("发送Up服务重置请求...")
+                elif self.dance_type == "Down" and self.play_down_service is not None:
+                    # 发送一个快速的重置请求
+                    rospy.loginfo("发送Down服务重置请求...")
+                rospy.sleep(1.0)  # 给服务时间重置
+            except Exception as e:
+                rospy.logwarn(f"重置{self.dance_type}服务状态失败: {e}")
+        
         rospy.loginfo(f"Starting performance, dance type: {self.dance_type}")
         rospy.loginfo(f"总路径点数量: {len(self.waypoints)}")
         rospy.loginfo(f"第一个路径点: {self.waypoints[0] if self.waypoints else 'None'}")
@@ -339,6 +355,53 @@ class SimpleNavWaypointPlayer:
         else:
             return f"[舞蹈位置 {waypoint_index+1}]"
     
+    def _schedule_final_shutdown(self):
+        """延迟关闭程序，给机器人时间完成最后的导航"""
+        rospy.loginfo("设置延迟关闭定时器，等待机器人完成最后的导航...")
+        
+        # 获取后台点位置
+        if self.waypoints:
+            backstage_pos = self.waypoints[-1]
+            rospy.loginfo(f"等待机器人到达后台点: {backstage_pos}")
+            
+            # 设置位置监控定时器，检查是否到达后台点
+            self._monitor_final_position(backstage_pos)
+        
+        # 设置最大超时关闭定时器（15秒）
+        shutdown_timer = rospy.Timer(
+            rospy.Duration(15.0), self._final_shutdown, oneshot=True
+        )
+        self._timers.append(shutdown_timer)
+    
+    def _monitor_final_position(self, target_pos):
+        """监控机器人是否到达最终位置"""
+        def check_position(event):
+            if self.reached_final:
+                # 检查是否到达后台点
+                dx = self.current_position["x"] - target_pos[0]
+                dy = self.current_position["y"] - target_pos[1]
+                distance = math.sqrt(dx*dx + dy*dy)
+                
+                rospy.loginfo(f"距离后台点还有: {distance:.2f}米")
+                
+                if distance < 0.5:  # 如果距离小于0.3米，认为已到达
+                    rospy.loginfo("机器人已到达后台点，可以安全关闭程序")
+                    # 提前关闭程序
+                    self._final_shutdown(None)
+        
+        # 每2秒检查一次位置
+        position_timer = rospy.Timer(
+            rospy.Duration(2.0), check_position, oneshot=False
+        )
+        self._timers.append(position_timer)
+    
+    def _final_shutdown(self, event):
+        """最终关闭程序"""
+        rospy.loginfo("延迟关闭时间到，程序即将退出")
+        rospy.signal_shutdown("任务完成")
+        import sys
+        sys.exit(0)
+
     def cleanup(self):
         """清理资源"""
         rospy.loginfo("开始清理资源...")
@@ -549,11 +612,9 @@ class SimpleNavWaypointPlayer:
                 rospy.loginfo(f"[调试] 最终航点索引: {self.current_waypoint_index}, 总航点数: {len(self.waypoints)}")
                 self.reached_final = True
                 self.set_state(NavigationState.COMPLETED)
-                # 任务完成，自动退出程序
-                rospy.loginfo("导航舞蹈任务完成，程序即将退出")
-                rospy.signal_shutdown("任务完成")
-                import sys
-                sys.exit(0)
+                # 给机器人时间完成最后的导航，然后延迟退出
+                rospy.loginfo("所有路径点已完成，等待机器人完成最后的导航...")
+                self._schedule_final_shutdown()
 
 
     def check_navigation_progress(self, event):
@@ -778,11 +839,9 @@ class SimpleNavWaypointPlayer:
                 rospy.loginfo(f"[调试] 最终航点索引: {self.current_waypoint_index}, 总航点数: {len(self.waypoints)}")
                 self.reached_final = True
                 self.set_state(NavigationState.COMPLETED)
-                # 任务完成，自动退出程序
-                rospy.loginfo("导航舞蹈任务完成，程序即将退出")
-                rospy.signal_shutdown("任务完成")
-                import sys
-                sys.exit(0)
+                # 给机器人时间完成最后的导航，然后延迟退出
+                rospy.loginfo("所有路径点已完成，等待机器人完成最后的导航...")
+                self._schedule_final_shutdown()
                 return
 
             # Reset for new navigation attempt
@@ -1028,9 +1087,15 @@ class SimpleNavWaypointPlayer:
                     self.force_move_to_next_waypoint()
                     return
                 
-                # 在单独线程中调用对应的服务
+               #  在单独线程中调用对应的服务，添加超时机制
                 def call_up_down_service():
                     try:
+                        rospy.loginfo(f"开始调用{self.dance_type}模式服务...")
+                        
+                        # 添加服务调用前的状态检查和重置
+                        rospy.loginfo("检查并重置服务状态...")
+                        rospy.sleep(1.0)  # 给服务时间重置状态
+                        
                         if self.dance_type == "Up":
                             response = self.play_up_service()
                         else:  # Down
@@ -1046,6 +1111,19 @@ class SimpleNavWaypointPlayer:
                         # 服务调用完成后，设置定时器等待
                         rospy.loginfo(f"{self.dance_type}模式服务调用完成，开始等待时间")
                         self.schedule_next_waypoint()
+                
+               #  # 设置服务调用超时定时器，防止服务卡住
+               #  def service_timeout_handler():
+               #      rospy.logwarn(f"{self.dance_type}模式服务调用超时，强制继续导航...")
+               #      self.schedule_next_waypoint()
+                
+               #  # 设置超时定时器（等待时间 + 10秒缓冲）
+               #  wait_time = self.wait_times[self.current_waypoint_index] if self.current_waypoint_index < len(self.wait_times) else 0
+               #  timeout_duration = wait_time + 10.0  # 等待时间 + 10秒缓冲
+               #  timeout_timer = rospy.Timer(
+               #      rospy.Duration(timeout_duration), service_timeout_handler, oneshot=True
+               #  )
+               #  self._timers.append(timeout_timer)
                 
                 service_thread = threading.Thread(target=call_up_down_service)
                 service_thread.daemon = True
@@ -1144,16 +1222,15 @@ class SimpleNavWaypointPlayer:
                 rospy.loginfo(f"[调试] 最终航点索引: {self.current_waypoint_index}, 总航点数: {len(self.waypoints)}")
                 self.reached_final = True
                 self.set_state(NavigationState.COMPLETED)
-                # 任务完成，自动退出程序
-                rospy.loginfo("导航舞蹈任务完成，程序即将退出")
-                rospy.signal_shutdown("任务完成")
-                import sys
-                sys.exit(0)
+                # 给机器人时间完成最后的导航，然后延迟退出
+                rospy.loginfo("所有路径点已完成，等待机器人完成最后的导航...")
+                self._schedule_final_shutdown()
 
     def feedback_callback(self, msg):
         """Handle navigation feedback - 到达检测由g1_control.py处理"""
         current_state = self.get_state()
-        if self.reached_final or current_state in [NavigationState.DANCING, NavigationState.COMPLETED]:
+        # 即使reached_final为True，也要继续更新位置信息，直到真正完成导航
+        if current_state in [NavigationState.DANCING, NavigationState.COMPLETED]:
             return
 
         # Update current position for logging only
@@ -1198,65 +1275,88 @@ if __name__ == "__main__":
                 ((-2.6, 3.4, 180), 40.0),
                 ((-3.0, 3.4, -170), 20.0),
                 ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.6, 0, 0), 0),
+                ((-0.8, 0, 0), 0),
             ]
         },
         #沙家浜总有一天 - 全局时间92.5秒
         "B": {
-            "global_time": 92.5,
+            "global_time": 22.5,
             "waypoints": [
-                ((-2.1, 3.4, 170), 20.0),
-                ((-2.3, 3.4, 180), 40.0),
+                ((-2.1, 3.4, 170), 10.0),
+                ((-2.3, 3.4, 180), 10.0),
                 ((-2.6, 3.4, -170), 20.0),
                 ((-2.8, 3.4, 180), 12.5),
                 ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.6, 0, 0), 0),
+                ((-0.8, 0, 0), 0),
             ]
         },
-         #军民鱼水情 - 全局时间234秒
+         #军民鱼水情 - 全局时间272秒  3*60+52=272
         "X": {
-            "global_time": 234.0,
+            "global_time": 272.0,
             "waypoints": [
-                ((-2.4, 2.6, 172), 60.0),
-                ((-2.7, 3.2, 160), 50.0),
-                ((-2.7, 3.5, 160), 63.5),
-                ((-3.1, 3.4, 180), 60.5),
+                ((-2.8, 2.3, -172), 25.0),
+                ((-3.2, 2.6, 172), 25.0),
+                
+                ((-2.7, 2.9, 160), 28.0),
+                ((-2.7, 2.7, 180), 28.0),
+                
+                ((-2.7, 3.2, 160), 33.5),
+                
+                ((-3.2, 3.2, 160), 33.5),
+                
+                
+                ((-2.7, 2.7, 160), 33.5),
+                
+                ((-3.1, 3.1, 180), 40.5),
                 ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.6, 0, 0), 0),
+                ((-0.8, 0, 0), 0),
             ]
         },
-        #智斗 - 全局时间420秒
+        #智斗 - 全局时间520秒 (15个点位 × 30秒)
         "Y": {
-            "global_time": 420.0,
+            "global_time": 520.0,
             "waypoints": [
-                ((-2.2, 3.0, 170), 60.0),
-                ((-2.8, 3.4, 180), 60.0),
-                ((-2.2, 3.0, -170),60.0),
-                ((-2.8, 3.4, 170), 60.0),
-                ((-2.2, 3.0, 180), 60.0),
-                ((-2.2, 3.4, -170),60.0),
-                ((-3.0, 3.0, 170), 60.0),
-                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.6, 0, 0), 0),
+                ((-2.2, 2.6, -170), 30.0),
+                ((-2.8, 3.0, 180), 30.0),
+                ((-2.2, 2.6, -170), 30.0),
+                ((-2.8, 3.0, 170), 30.0),
+                ((-2.2, 2.6, 180), 30.0),
+                ((-2.2, 3.0, -170), 30.0),
+                ((-3.0, 2.6, 170), 30.0),
+                ((-2.5, 2.8, 160), 30.0),
+                ((-2.7, 2.7, -160), 30.0),
+                ((-2.3, 2.9, 175), 30.0),
+                ((-2.9, 2.6, -175), 30.0),
+                ((-2.1, 2.8, 165), 30.0),
+                ((-2.6, 2.9, -165), 30.0),
+                ((-2.4, 2.5, 185), 30.0),
+                ((-2.2, 3.0, -170), 30.0),
+                ((-2.2, 3.0, -170), 30.0),
+                ((-3.0, 2.6, 170), 30.0),
+                ((-2.5, 2.8, 160), 30.0),
+                ((-3.0, 2.6, 170), 30.0),
+                ((-2.8, 2.8, -185), 30.0),
+                ((-1.91, 1.35, 0), 0),    # 门口点位，中间过渡点
+                ((-0.8, 0, 0), 0),
             ]
         },
-        # 上台 - 全局时间30秒
+        # 上台 - 全局时间50秒
         "Up": {
-            "global_time": 30.0,
+            "global_time": 40.0,
             "waypoints": [
-                ((-2.6, 3.4, 170), 30.0),
-                ((-1.8,1.9, -40), 0),    # 门口点位，中间过渡点
+                ((-2.6, 3.4, -170), 40.0),
+                ((-1.8, 1.9, -40), 0),    # 门口点位，中间过渡点
                 ((-0.6, 0, 0), 0),
             ]
         },
         
-        #下台 - 全局时间30秒
+        #下台 - 全局时间50秒
          "Down": {
-            "global_time": 30.0,
+            "global_time": 40.0,
             "waypoints": [
-                ((-2.6, 3.4, 170), 30.0),
+                ((-2.6, 3.4, 170), 45.0),
                 ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.6, 0, 0), 0),
+                ((-0.8, 0, 0), 0),
             ]
         },
     }

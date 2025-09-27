@@ -1,7 +1,7 @@
 # 优化的自动重定位配置文件
 
 # 1. 地图设置
-map_pcd_path: "/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD/platform_1_5.pcd"
+map_pcd_path: "/home/unitree/HongTu/G1Nav2D/src/fastlio2/PCD/first_platform.pcd"
 
 # 2. 初始位置估计
 # 支持多个可能的起始位置

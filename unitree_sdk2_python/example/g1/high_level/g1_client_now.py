@@ -1986,10 +1986,10 @@ class G1ActionPlayer:
             # 确定总时长：优先使用音频时长，否则使用动作帧数计算
             if hasattr(self, 'audio_duration') and self.audio_duration is not None and self.audio_duration > 0:
                 total_duration = self.audio_duration
-                print(f"[DEBUG] 使用音频时长: {total_duration:.2f} 秒")
+               #  print(f"[DEBUG] 使用音频时长: {total_duration:.2f} 秒")
             else:
                 total_duration = len(self.action_data) * self.dt  # 基于动作帧数计算
-                print(f"[DEBUG] 使用动作时长: {total_duration:.2f} 秒")
+               #  print(f"[DEBUG] 使用动作时长: {total_duration:.2f} 秒")
             
             # 检查动作是否播放完成或者音频是否播放完成
             action_finished = elapsed >= total_duration
@@ -2833,9 +2833,9 @@ def main(return_remote=False):
                         resp.message = f"启动失败: {direction}"
                         return resp
 
-                    # 等待完成（最多120秒）
+                    # 等待完成（最多600秒，适应最长舞蹈7分钟）
                     t0 = time.time()
-                    while player.state != "stopped" and (time.time()-t0) < 120.0:
+                    while player.state != "stopped" and (time.time()-t0) < 600.0:
                         time.sleep(0.1)
 
                     if player.state == "stopped":
@@ -3264,7 +3264,7 @@ def main(return_remote=False):
                             # 在独立后台进程中运行，避免阻塞
                             subprocess.Popen([
                                 "bash", "-lc",
-                                "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Q'"
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Up'"
                             ])
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                 player.audio_processor.audio_client.TtsMaker("上台", 0)
@@ -3282,7 +3282,7 @@ def main(return_remote=False):
                             # 在独立后台进程中运行，避免阻塞
                             subprocess.Popen([
                                 "bash", "-lc",
-                                "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'H'"
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Down'"
                             ])
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                 player.audio_processor.audio_client.TtsMaker("下台", 0)
