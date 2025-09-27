@@ -107,6 +107,10 @@ class SimpleNavWaypointPlayer:
         self.global_timer = None
         self.force_return_triggered = False
         
+        # 固定时间调度系统
+        self.waypoint_schedule = []  # 存储每个航点的计划时间
+        self.schedule_timer = None    # 调度定时器
+        
         # 定时器管理
         self._timers = []
         self._threads = []
@@ -233,6 +237,12 @@ class SimpleNavWaypointPlayer:
         rospy.loginfo(f"Starting performance, dance type: {self.dance_type}")
         rospy.loginfo(f"总路径点数量: {len(self.waypoints)}")
         rospy.loginfo(f"第一个路径点: {self.waypoints[0] if self.waypoints else 'None'}")
+        
+        # 创建固定时间调度
+        self.create_waypoint_schedule()
+        
+        # 启动全局时间计时器（在导航开始前就启动）
+        self.start_global_timer()
         
         # 再次检查舞蹈服务状态 - 只检查服务是否存在，不实际调用
         if self.play_dance_service is not None:
@@ -466,13 +476,23 @@ class SimpleNavWaypointPlayer:
     def log_status_info(self, event):
         """定期记录状态信息"""
         status = self.get_status_info()
+        
+        # 添加固定时间调度信息
+        schedule_info = ""
+        if self.waypoint_schedule and self.global_start_time:
+            elapsed_time = (rospy.Time.now() - self.global_start_time).to_sec()
+            if self.current_waypoint_index < len(self.waypoint_schedule):
+                current_schedule = self.waypoint_schedule[self.current_waypoint_index]
+                remaining_time = current_schedule['end_time'] - elapsed_time
+                schedule_info = f" 调度时间:{elapsed_time:.1f}s 剩余:{remaining_time:.1f}s"
+        
         # 添加更详细的航点信息
         if self.current_waypoint_index < len(self.waypoints):
             current_waypoint = self.waypoints[self.current_waypoint_index]
             waypoint_desc = self.get_waypoint_description(self.current_waypoint_index)
-            rospy.loginfo(f"[状态监控] 状态:{status['state']} 航点:{status['current_waypoint']+1}/{status['total_waypoints']} {waypoint_desc} 位置:{current_waypoint} 舞蹈已调用:{status['dance_service_called']}")
+            rospy.loginfo(f"[状态监控] 状态:{status['state']} 航点:{status['current_waypoint']+1}/{status['total_waypoints']} {waypoint_desc} 位置:{current_waypoint} 舞蹈已调用:{status['dance_service_called']}{schedule_info}")
         else:
-            rospy.loginfo(f"[状态监控] {status}")
+            rospy.loginfo(f"[状态监控] {status}{schedule_info}")
 
     def status_callback(self, msg):
         """Monitor move_base status"""
@@ -521,8 +541,7 @@ class SimpleNavWaypointPlayer:
         # 对于第一个点，需要开始舞蹈
         elif self.current_waypoint_index == 0 and not self.dance_service_called:
             rospy.loginfo("到达第一个点，开始执行舞蹈")
-            # 启动全局时间计时器
-            self.start_global_timer()
+            # 全局时间计时器已在初始化时启动
             self.set_state(NavigationState.WAITING)
             self.perform_dance()
             # 注意：第一个点的索引增加在舞蹈完成后通过schedule_next_waypoint处理
@@ -743,6 +762,92 @@ class SimpleNavWaypointPlayer:
             
         except Exception as e:
             rospy.logwarn(f"恢复默认参数失败: {e}")
+
+    def create_waypoint_schedule(self):
+        """创建基于全局时间的固定航点调度"""
+        if not self.waypoints or not self.wait_times:
+            rospy.logwarn("没有航点或等待时间数据，无法创建调度")
+            return
+            
+        # 计算每个航点的计划时间
+        current_time = 0.0
+        self.waypoint_schedule = []
+        
+        for i in range(len(self.waypoints)):
+            waypoint = self.waypoints[i]
+            wait_time = self.wait_times[i] if i < len(self.wait_times) else 0
+            
+            # 记录这个航点的计划时间
+            schedule_entry = {
+                'waypoint_index': i,
+                'start_time': current_time,
+                'end_time': current_time + wait_time,
+                'wait_time': wait_time,
+                'waypoint': waypoint
+            }
+            self.waypoint_schedule.append(schedule_entry)
+            
+            rospy.loginfo(f"航点 {i+1}: {self.get_waypoint_description(i)} 计划时间 {current_time:.1f}s - {current_time + wait_time:.1f}s (等待{wait_time}s)")
+            
+            # 下一个航点的开始时间
+            current_time += wait_time
+        
+        rospy.loginfo(f"固定时间调度创建完成，总计划时间: {current_time:.1f}秒")
+        
+        # 启动调度定时器
+        self.start_schedule_timer()
+    
+    def start_schedule_timer(self):
+        """启动调度定时器，检查是否到了换点时间"""
+        if self.schedule_timer:
+            self.schedule_timer.shutdown()
+            
+        # 每秒检查一次调度
+        self.schedule_timer = rospy.Timer(
+            rospy.Duration(1.0), self.check_schedule, oneshot=False
+        )
+        self._timers.append(self.schedule_timer)
+    
+    def check_schedule(self, event):
+        """检查是否到了换点时间"""
+        if not self.waypoint_schedule or not self.global_start_time:
+            return
+            
+        elapsed_time = (rospy.Time.now() - self.global_start_time).to_sec()
+        
+        # 检查当前航点是否应该结束
+        if self.current_waypoint_index < len(self.waypoint_schedule):
+            current_schedule = self.waypoint_schedule[self.current_waypoint_index]
+            
+            # 如果超过了当前航点的计划结束时间，强制换点
+            if elapsed_time >= current_schedule['end_time']:
+                rospy.logwarn(f"[固定时间调度] 航点 {self.current_waypoint_index+1} 计划时间已到 ({elapsed_time:.1f}s >= {current_schedule['end_time']:.1f}s)，强制换点")
+                self.force_transition_to_next_waypoint()
+    
+    def force_transition_to_next_waypoint(self):
+        """强制转换到下一个航点，不管当前导航状态"""
+        with self._lock:
+            rospy.logwarn(f"[固定时间调度] 强制从航点 {self.current_waypoint_index+1} 转换到下一个航点")
+            
+            # 取消当前导航
+            try:
+                cancel_msg = GoalID()
+                self.cancel_pub.publish(cancel_msg)
+                rospy.sleep(0.1)
+            except Exception as e:
+                rospy.logwarn(f"取消当前导航失败: {e}")
+            
+            # 直接进入下一个航点
+            self.current_waypoint_index += 1
+            
+            if self.current_waypoint_index < len(self.waypoints):
+                rospy.loginfo(f"[固定时间调度] 开始导航到航点 {self.current_waypoint_index+1}")
+                self.navigate_to_current_waypoint()
+            else:
+                rospy.loginfo("[固定时间调度] 所有航点已完成")
+                self.reached_final = True
+                self.set_state(NavigationState.COMPLETED)
+                self._schedule_final_shutdown()
 
     def start_global_timer(self):
         """启动全局时间计时器"""
@@ -1248,26 +1353,9 @@ class SimpleNavWaypointPlayer:
             rospy.logerr(f"舞蹈服务执行错误: {e}")
 
     def schedule_next_waypoint(self):
-        """Schedule movement to next waypoint after waiting period"""
-        # 获取等待时间，确保不为0
-        wait_time = self.wait_times[self.current_waypoint_index] if self.current_waypoint_index < len(self.wait_times) else 0
-        
-        # 如果等待时间为0，直接继续到下一个路径点
-        if wait_time <= 0:
-            rospy.loginfo("等待时间为0，直接继续到下一个路径点")
-            self.continue_to_next_waypoint()
-            return
-        
-        # If we have an existing timer, cancel it
-        if self.dance_timer:
-            self.dance_timer.shutdown()
-
-        # Schedule the continuation after the wait time
-        rospy.loginfo(f"计划在{wait_time}秒后移动到下一个路径点")
-        self.dance_timer = rospy.Timer(
-            rospy.Duration(wait_time), self.continue_to_next_waypoint, oneshot=True
-        )
-        self._timers.append(self.dance_timer)
+        """Schedule movement to next waypoint - 现在由固定时间调度控制"""
+        rospy.loginfo("航点转换现在由固定时间调度控制，不再使用等待时间")
+        # 固定时间调度会自动处理航点转换，这里不需要做任何事情
 
     def continue_to_next_waypoint(self, event=None):
         """Timer callback to continue to next waypoint"""
@@ -1419,7 +1507,7 @@ if __name__ == "__main__":
         #智斗 - 全局时间520秒 (15个点位 × 30秒)
         # Start + Left:
         "Y": {
-            "global_time": 530.0,
+            "global_time": 478.0,
             "waypoints": [
                 ((-2.8, 2.6, 150), 15.0),     
                 ((-2.5, 2.6, 140), 55.0),     
