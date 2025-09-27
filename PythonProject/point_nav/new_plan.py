@@ -219,30 +219,52 @@ class SimpleNavWaypointPlayer:
         # 增加启动延迟，确保所有服务完全初始化
         rospy.sleep(2.0)
         
-        # 对于Up/Down模式，强制重置服务状态
-        if self.dance_type in ["Up", "Down"]:
-            rospy.loginfo(f"重置{self.dance_type}模式服务状态...")
-            try:
-                # 尝试调用服务来重置状态
-                if self.dance_type == "Up" and self.play_up_service is not None:
-                    # 发送一个快速的重置请求
-                    rospy.loginfo("发送Up服务重置请求...")
-                elif self.dance_type == "Down" and self.play_down_service is not None:
-                    # 发送一个快速的重置请求
-                    rospy.loginfo("发送Down服务重置请求...")
-                rospy.sleep(1.0)  # 给服务时间重置
-            except Exception as e:
-                rospy.logwarn(f"重置{self.dance_type}服务状态失败: {e}")
+        # 强制重置所有舞蹈服务状态，确保从干净状态开始
+        rospy.loginfo("重置所有舞蹈服务状态...")
+        try:
+            # 重置舞蹈服务状态标志
+            self.dance_service_called = False
+            
+            # 对于Up/Down模式，强制重置服务状态
+            if self.dance_type in ["Up", "Down"]:
+                rospy.loginfo(f"重置{self.dance_type}模式服务状态...")
+                try:
+                    # 尝试调用服务来重置状态
+                    if self.dance_type == "Up" and self.play_up_service is not None:
+                        # 发送一个快速的重置请求
+                        rospy.loginfo("发送Up服务重置请求...")
+                    elif self.dance_type == "Down" and self.play_down_service is not None:
+                        # 发送一个快速的重置请求
+                        rospy.loginfo("发送Down服务重置请求...")
+                    rospy.sleep(1.0)  # 给服务时间重置
+                except Exception as e:
+                    rospy.logwarn(f"重置{self.dance_type}服务状态失败: {e}")
+            
+            # 对于所有模式，尝试重置舞蹈服务状态
+            if self.play_dance_service is not None:
+                rospy.loginfo("重置舞蹈服务状态...")
+                try:
+                    # 发布停止消息，确保舞蹈服务处于停止状态
+                    stop_msg = String()
+                    stop_msg.data = "stop"
+                    # 如果有停止话题，可以在这里发布
+                    rospy.loginfo("舞蹈服务停止命令已发送")
+                except Exception as e:
+                    rospy.logwarn(f"重置舞蹈服务状态失败: {e}")
+                    
+            rospy.loginfo("所有舞蹈服务状态重置完成")
+            
+        except Exception as e:
+            rospy.logwarn(f"重置舞蹈服务状态失败: {e}")
         
         rospy.loginfo(f"Starting performance, dance type: {self.dance_type}")
         rospy.loginfo(f"总路径点数量: {len(self.waypoints)}")
         rospy.loginfo(f"第一个路径点: {self.waypoints[0] if self.waypoints else 'None'}")
+        rospy.loginfo(f"舞蹈服务状态: dance_service_called={self.dance_service_called}")
+        rospy.loginfo(f"舞蹈服务可用性: play_dance_service={'可用' if self.play_dance_service is not None else '不可用'}")
         
         # 创建固定时间调度
         self.create_waypoint_schedule()
-        
-        # 启动全局时间计时器（在导航开始前就启动）
-        self.start_global_timer()
         
         # 再次检查舞蹈服务状态 - 只检查服务是否存在，不实际调用
         if self.play_dance_service is not None:
@@ -441,6 +463,18 @@ class SimpleNavWaypointPlayer:
                 # 重置舞蹈服务状态
                 self.dance_service_called = False
                 rospy.loginfo("舞蹈服务状态已重置")
+                
+                # 尝试停止舞蹈服务，确保服务状态重置
+                try:
+                    rospy.loginfo("尝试停止舞蹈服务...")
+                    # 发送停止命令给舞蹈服务
+                    stop_msg = String()
+                    stop_msg.data = "stop"
+                    # 这里可以发布停止消息，如果有对应的停止话题
+                    rospy.loginfo("舞蹈服务停止命令已发送")
+                except Exception as stop_e:
+                    rospy.logwarn(f"停止舞蹈服务失败: {stop_e}")
+                    
         except Exception as e:
             rospy.logwarn(f"清理舞蹈服务失败: {e}")
         
@@ -541,7 +575,22 @@ class SimpleNavWaypointPlayer:
         # 对于第一个点，需要开始舞蹈
         elif self.current_waypoint_index == 0 and not self.dance_service_called:
             rospy.loginfo("到达第一个点，开始执行舞蹈")
-            # 全局时间计时器已在初始化时启动
+            
+            # 在开始舞蹈前，再次确保舞蹈服务状态正确
+            rospy.loginfo("检查舞蹈服务状态...")
+            try:
+                # 强制重置舞蹈服务状态
+                self.dance_service_called = False
+                rospy.loginfo("舞蹈服务状态已重置")
+                
+                # 等待一小段时间确保服务状态稳定
+                rospy.sleep(0.5)
+                
+            except Exception as e:
+                rospy.logwarn(f"重置舞蹈服务状态失败: {e}")
+            
+            # 启动全局时间计时器（从到达第一个点开始计时）
+            self.start_global_timer()
             self.set_state(NavigationState.WAITING)
             self.perform_dance()
             # 注意：第一个点的索引增加在舞蹈完成后通过schedule_next_waypoint处理
@@ -793,9 +842,7 @@ class SimpleNavWaypointPlayer:
             current_time += wait_time
         
         rospy.loginfo(f"固定时间调度创建完成，总计划时间: {current_time:.1f}秒")
-        
-        # 启动调度定时器
-        self.start_schedule_timer()
+        rospy.loginfo("调度定时器将在到达第一个点时启动")
     
     def start_schedule_timer(self):
         """启动调度定时器，检查是否到了换点时间"""
@@ -860,6 +907,10 @@ class SimpleNavWaypointPlayer:
                 rospy.Duration(1.0), self.check_global_time, oneshot=False
             )
             self._timers.append(self.global_timer)
+            
+            # 同时启动调度定时器
+            self.start_schedule_timer()
+            rospy.loginfo("固定时间调度定时器已启动")
 
     def check_global_time(self, event):
         """检查全局时间是否超时"""
@@ -1431,6 +1482,14 @@ if __name__ == "__main__":
         "A": {
             "global_time": 310.0,
             "waypoints": [
+                ((-1.5, 0, 180), 66.0),
+               
+                ((-2.2, 3.0, 180), 30.0),
+                ((-2.6, 3.4, 180), 40.0),
+                ((-3.0, 3.4, -170), 20.0),
+                ((-2.2, 3.0, 180), 30.0),
+                ((-2.6, 3.4, 180), 40.0),
+                ((-3.0, 3.4, -170), 20.0),
                 ((-2.2, 3.0, 180), 30.0),
                 ((-2.6, 3.4, 180), 40.0),
                 ((-3.0, 3.4, -170), 20.0),
@@ -1443,21 +1502,21 @@ if __name__ == "__main__":
         "B": {
             "global_time": 180.5,
             "waypoints": [
-                ((-2.3, 3.4, 180), 40.0),
-                ((-2.6, 3.4, -170), 40.0),
-                ((-2.8, 3.4, 180), 42.5),
+                ((-2.3, 3.6, 180), 40.0),
+                ((-2.6, 3.6, -170), 40.0),
+                ((-2.8, 3.6, 180), 42.5),
                                 
-                ((-2.7, 2.9, 160), 38.0),
-                ((-2.7, 2.7, 180), 38.0),
+                ((-2.7, 3.2, 160), 38.0),
+                ((-2.7, 2.9, 180), 38.0),
                 
-                ((-2.8, 3.4, 180), 42.5),
+                ((-2.8, 3.6, 180), 42.5),
                                 
-                ((-2.7, 2.9, 160), 38.0),
-                ((-2.7, 2.7, 180), 38.0),
+                ((-2.7, 3.1, 160), 38.0),
+                ((-2.7, 2.9, 180), 38.0),
                 
-                ((-2.3, 3.4, 180), 40.0),
-                ((-2.6, 3.4, -170), 40.0),
-                ((-2.8, 3.4, 180), 42.5),
+                ((-2.3, 3.6, 180), 40.0),
+                ((-2.6, 3.6, -170), 40.0),
+                ((-2.8, 3.6, 180), 42.5),
                                 
                 ((-2.7, 2.9, 160), 38.0),
                 ((-2.7, 2.7, 180), 38.0),
@@ -1482,20 +1541,20 @@ if __name__ == "__main__":
          #军民鱼水情 - 全局时间272秒  3*60+52=272
          # Start + Right:
         "X": {
-            "global_time": 252.0,
+            "global_time": 258.0,
             "waypoints": [
-                ((-2.8, 2.6, 150), 15.0),     
+                ((-2.8, 2.6, 150), 25.0),     
                 ((-2.5, 2.6, 140), 55.0),     
                 
-                ((-2.5, 3.0, 180), 10.0),
+                ((-2.5, 3.0, 180), 20.0),
                 
                #  ((-2.6, 3.0, 180), 60.0),     
                      
-                ((-2.75, 3.8, -170), 98.0),    
+                ((-2.75, 3.8, -160), 98.0),    
                 
-                ((-3.0, 3.4, -175), 65.0),     
+                ((-3.0, 3.4, -175), 75.0),     
                 
-                ((-2.8, 3.2, 180), 55.0),   
+                ((-2.8, 3.2, 180), 75.0),   
                 
                 ((-3.0, 3.2, -160), 55.0),     
                   
@@ -1547,7 +1606,7 @@ if __name__ == "__main__":
         },
         # 上台 - 全局时间50秒
         "Up": {
-            "global_time": 45.0,
+            "global_time": 42.0,
             "waypoints": [
                 ((-2.6, 3.4, 180), 40.0),
                 ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
