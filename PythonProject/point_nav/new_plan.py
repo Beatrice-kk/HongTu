@@ -466,7 +466,13 @@ class SimpleNavWaypointPlayer:
     def log_status_info(self, event):
         """定期记录状态信息"""
         status = self.get_status_info()
-        rospy.loginfo(f"[状态监控] {status}")
+        # 添加更详细的航点信息
+        if self.current_waypoint_index < len(self.waypoints):
+            current_waypoint = self.waypoints[self.current_waypoint_index]
+            waypoint_desc = self.get_waypoint_description(self.current_waypoint_index)
+            rospy.loginfo(f"[状态监控] 状态:{status['state']} 航点:{status['current_waypoint']+1}/{status['total_waypoints']} {waypoint_desc} 位置:{current_waypoint} 舞蹈已调用:{status['dance_service_called']}")
+        else:
+            rospy.loginfo(f"[状态监控] {status}")
 
     def status_callback(self, msg):
         """Monitor move_base status"""
@@ -519,6 +525,7 @@ class SimpleNavWaypointPlayer:
             self.start_global_timer()
             self.set_state(NavigationState.WAITING)
             self.perform_dance()
+            # 注意：第一个点的索引增加在舞蹈完成后通过schedule_next_waypoint处理
         else:
             # 其他点或舞蹈已调用，直接按等待时间停留
             rospy.loginfo("按等待时间停留")
@@ -825,10 +832,76 @@ class SimpleNavWaypointPlayer:
                 import sys
                 sys.exit(0)
             else:
-                rospy.logwarn(f"强制返回超时，距离后台点还有 {distance:.2f}米，继续尝试...")
-                # 重新发布后台点目标
-                goal_msg = self._build_move_base_goal(-0.6, 0.0, 0.0)
-                self.goal_pub.publish(goal_msg)
+                rospy.logwarn(f"强制返回超时，距离后台点还有 {distance:.2f}米，尝试RViz风格备用航点...")
+                # 使用RViz风格的备用航点策略
+                self._try_rviz_style_backstage_approach()
+
+    def _try_rviz_style_backstage_approach(self):
+        """RViz风格的备用后台点策略 - 在后台点附近尝试多个位置"""
+        rospy.loginfo("尝试RViz风格备用后台点策略...")
+        
+        # 原始后台点
+        original_backstage = (-0.6, 0, 0)
+        
+        # 生成备用后台点列表（模拟RViz手动点击的位置）
+        alternative_backstage_points = [
+            (-0.5, 0, 0),      # 稍微向右
+            (-0.7, 0, 0),      # 稍微向左  
+            (-0.6, 0.1, 0),     # 稍微向前
+            (-0.6, -0.1, 0),    # 稍微向后
+            (-0.4, 0, 0),       # 更向右
+            (-0.8, 0, 0),       # 更向左
+            (-0.6, 0.2, 0),     # 更向前
+            (-0.6, -0.2, 0),    # 更向后
+        ]
+        
+        # 尝试每个备用点
+        for i, (x, y, theta) in enumerate(alternative_backstage_points):
+            rospy.loginfo(f"尝试备用后台点 {i+1}/{len(alternative_backstage_points)}: ({x}, {y}, {theta})")
+            
+            # 取消当前目标
+            cancel_msg = GoalID()
+            self.cancel_pub.publish(cancel_msg)
+            rospy.sleep(0.5)
+            
+            # 发布备用目标
+            goal_msg = self._build_move_base_goal(x, y, theta)
+            self.goal_pub.publish(goal_msg)
+            
+            # 等待一段时间看是否成功
+            rospy.sleep(3.0)
+            
+            # 检查是否开始移动
+            current_dx = self.current_position["x"] - (-0.6)
+            current_dy = self.current_position["y"] - 0.0
+            current_distance = math.sqrt(current_dx*current_dx + current_dy*current_dy)
+            
+            # 如果距离后台点很近，认为成功
+            if current_distance < 0.5:
+                rospy.loginfo(f"✅ 备用后台点 {i+1} 成功，距离后台点 {current_distance:.2f}米")
+                # 设置成功检测定时器
+                self.plan_failure_timer = rospy.Timer(
+                    rospy.Duration(10.0), self.check_force_return_success, oneshot=True
+                )
+                self._timers.append(self.plan_failure_timer)
+                return
+            else:
+                rospy.logwarn(f"备用后台点 {i+1} 未成功，继续尝试下一个...")
+        
+        # 如果所有备用点都失败，最后尝试原始后台点
+        rospy.logwarn("所有备用后台点都失败，最后尝试原始后台点...")
+        cancel_msg = GoalID()
+        self.cancel_pub.publish(cancel_msg)
+        rospy.sleep(0.5)
+        
+        goal_msg = self._build_move_base_goal(original_backstage[0], original_backstage[1], original_backstage[2])
+        self.goal_pub.publish(goal_msg)
+        
+        # 设置最终检测定时器
+        self.plan_failure_timer = rospy.Timer(
+            rospy.Duration(15.0), self.check_force_return_success, oneshot=True
+        )
+        self._timers.append(self.plan_failure_timer)
 
     def navigate_to_current_waypoint(self, is_retry=False):
         """Navigate to the current waypoint with error handling"""
@@ -924,10 +997,9 @@ class SimpleNavWaypointPlayer:
                         self._try_alternative_doorway_approach()
                     # 检查是否是最后一个航点（后台点）
                     elif self.current_waypoint_index == len(self.waypoints) - 1:
-                        rospy.logwarn(f"[路径规划失败] 机器人{detection_threshold}秒内只移动了{dist_moved:.3f}米，但这是最后一个航点，继续尝试...")
-                        # 对于最后一个点，重新发布目标而不是跳过
-                        rospy.loginfo("重新发布最后一个航点目标...")
-                        self.navigate_to_current_waypoint(is_retry=True)
+                        rospy.logwarn(f"[路径规划失败] 机器人{detection_threshold}秒内只移动了{dist_moved:.3f}米，但这是最后一个航点，尝试RViz风格备用策略...")
+                        # 对于最后一个点，使用RViz风格的备用策略
+                        self._try_rviz_style_backstage_approach()
                     else:
                         rospy.logwarn(f"[路径规划失败] 机器人{detection_threshold}秒内只移动了{dist_moved:.3f}米，跳过当前点")
                         self.force_move_to_next_waypoint()
@@ -1153,10 +1225,9 @@ class SimpleNavWaypointPlayer:
             self.dance_service_called = True
             rospy.loginfo("舞蹈服务调用已启动，等待完成后将继续导航")
 
-            # 对于非Up/Down模式，设置定时器等待
-            if self.dance_type not in ["Up", "Down"]:
-                # 设置一个定时器，确保即使舞蹈服务卡住也能继续
-                self.schedule_next_waypoint()
+            # 对于所有模式，设置定时器等待
+            # 设置一个定时器，确保即使舞蹈服务卡住也能继续
+            self.schedule_next_waypoint()
 
         except Exception as e:
             rospy.logerr(f"舞蹈服务调用失败: {e}")
@@ -1323,29 +1394,23 @@ if __name__ == "__main__":
          #军民鱼水情 - 全局时间272秒  3*60+52=272
          # Start + Right:
         "X": {
-            "global_time": 245.0,
+            "global_time": 252.0,
             "waypoints": [
-                ((-2.5, 2.5, 170), 25.0),     
-                ((-2.8, 2.8, 165), 35.0),     
+                ((-2.8, 2.6, 150), 15.0),     
+                ((-2.5, 2.6, 140), 55.0),     
                 
-                ((-2.6, 3.0, 160), 58.0),     
-                ((-2.4, 2.8, 170), 38.0),    
+                ((-2.5, 3.0, 180), 10.0),
                 
-                ((-2.5, 2.5, 170), 25.0),     
-                ((-2.8, 2.8, 165), 25.0),   
+               #  ((-2.6, 3.0, 180), 60.0),     
+                     
+                ((-2.75, 3.8, -170), 98.0),    
                 
+                ((-3.0, 3.4, -175), 65.0),     
                 
-                ((-2.4, 2.9, 160), 33.5),      
-                ((-2.4, 2.9, 160), 33.5),      
+                ((-2.8, 3.2, 180), 55.0),   
                 
-                ((-2.9, 2.9, 160), 33.5),     
-                
-                ((-2.9, 2.9, 160), 33.5),      
-                ((-2.9, 2.9, 160), 33.5),      
-                
-                ((-2.8, 3.1, 170), 40.5),      
-                ((-3.2, 2.9, 160), 33.5),     
-                ((-2.8, 2.8, 165), 25.0),     
+                ((-3.0, 3.2, -160), 55.0),     
+                  
                 
                 ((-1.91,1.35, 0), 0),          # 门口点位，中间过渡点
                 ((-0.8, 0, 0), 0),
@@ -1356,15 +1421,23 @@ if __name__ == "__main__":
         "Y": {
             "global_time": 530.0,
             "waypoints": [
-                ((-2.2, 2.6, 180), 30.0),
-                ((-2.8, 3.0, 180), 30.0),
-                ((-2.2, 2.6, -170), 30.0),
-                ((-2.8, 3.0, 170), 30.0),
-                ((-2.2, 2.6, 180), 30.0),
-                ((-2.2, 3.0, -170), 30.0),
-                ((-3.0, 2.6, 170), 30.0),
-                ((-2.5, 2.8, 160), 30.0),
-                ((-2.7, 2.7, -160), 30.0),
+                ((-2.8, 2.6, 150), 15.0),     
+                ((-2.5, 2.6, 140), 55.0),     
+                ((-2.5, 3.0, 180), 10.0),
+               #  ((-2.6, 3.0, 180), 60.0),   
+               #  90s   换位  
+                ((-2.75, 3.8, -170), 50.0),  
+                
+                #140s     背对 观众
+                ((-2.0, 3.0, 0), 65.0), 
+                
+                    #3*60+40=220s  右边桌子
+                ((-2.8, 3.2, 180), 40.0),  
+                #4*60+20=260s  靠墙壁 
+                ((-2.0, 2.6, 180), 160.0), 
+                ((-2.0, 2.6, 180), 160.0), 
+                #7*60=420s  
+                ((-3.0, 3.2, -160), 55.0),     
                 ((-2.3, 2.9, 175), 30.0),
                 ((-2.9, 2.6, -175), 30.0),
                 ((-2.1, 2.8, 165), 30.0),

@@ -46,13 +46,20 @@ def attempt_relocalization(map_path, x, y, yaw_rad):
 
     # 调用重定位服务
     response = call_service('/slam_reloc', SlamReLoc, req)
-    return response is not None and response.status == 1
+    if response is not None:
+        rospy.loginfo("Reloc service response: status=%s", response.status)
+        return response.status == 1
+    else:
+        rospy.logwarn("Reloc service call failed or returned None")
+        return False
 
 def check_reloc_status():
     """检查重定位是否成功"""
     response = call_service('/slam_reloc_check', SlamRelocCheck, SlamRelocCheckRequest())
     if response:
+        rospy.logdebug("Reloc check response: status=%s", response.status)
         return response.status
+    rospy.logwarn("Reloc check service call failed")
     return None # 如果服务调用失败，返回None
 
 # --- 主逻辑 ---
@@ -105,24 +112,34 @@ def main():
             rospy.logwarn("Failed to send relocalization command for yaw %.1f. Skipping.", yaw_deg)
             continue
         
-        # 等待一段时间让定位节点处理
-        rospy.sleep(1.0) 
+        # 等待更长时间让定位节点处理
+        rospy.sleep(3.0) 
 
         # 检查结果
         status = check_reloc_status()
+        rospy.loginfo("Reloc status check result: %s", status)
+        
+        # 再次等待并检查，确保重定位真正成功
         if status is True:
-            rospy.loginfo("======================================================")
-            rospy.loginfo("SUCCESS! Relocalization successful at yaw: %.2f degrees", yaw_deg)
-            rospy.loginfo("======================================================")
-            reloc_success = True
+            rospy.sleep(2.0)  # 额外等待
+            status2 = check_reloc_status()
+            rospy.loginfo("Second reloc status check: %s", status2)
             
-            # 发布重定位成功消息
-            success_msg = Bool()
-            success_msg.data = True
-            reloc_success_pub.publish(success_msg)
-            rospy.loginfo("Published relocalization success message")
-            
-            break
+            if status2 is True:
+                rospy.loginfo("======================================================")
+                rospy.loginfo("SUCCESS! Relocalization successful at yaw: %.2f degrees", yaw_deg)
+                rospy.loginfo("======================================================")
+                reloc_success = True
+                
+                # 发布重定位成功消息
+                success_msg = Bool()
+                success_msg.data = True
+                reloc_success_pub.publish(success_msg)
+                rospy.loginfo("Published relocalization success message")
+                
+                break
+            else:
+                rospy.logwarn("Second status check failed. Relocalization not stable at yaw %.1f", yaw_deg)
         else:
             rospy.logwarn("Relocalization failed at yaw %.1f. Trying next angle.", yaw_deg)
 

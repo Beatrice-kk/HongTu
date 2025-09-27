@@ -3,9 +3,13 @@ recovery_behaviors:
   type: 'clear_costmap_recovery/ClearCostmapRecovery'
 - name: 'clear_costmap_local'
   type: 'clear_costmap_recovery/ClearCostmapRecovery'
+- name: 'rotate_recovery'
+  type: 'rotate_recovery/RotateRecovery'
 
 get_path_recovery_behaviors:
   - name: 'clear_costmap_global'
+  - name: 'rotate_recovery'
 
 exe_path_recovery_behaviors:
   - name: 'clear_costmap_local'
+  - name: 'rotate_recovery'

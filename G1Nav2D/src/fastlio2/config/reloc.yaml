@@ -22,4 +22,4 @@ yaw_search:
   # The step size for the search, in degrees.
   # A smaller step increases accuracy but takes more time.
   # 15-30 degrees is a reasonable starting point.
-  step_deg: 20
+  step_deg: 10
