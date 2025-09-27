@@ -15,7 +15,7 @@ from datetime import datetime
 try:
     import rospy
     from std_srvs.srv import Trigger, TriggerResponse
-    from std_msgs.msg import String as RosString
+    from std_msgs.msg import String as RosString, Bool
 except Exception:
     rospy = None
 
@@ -288,6 +288,10 @@ class G1ActionPlayer:
         # 外部进程句柄（用于避免重复启动）
         self._fastlio_proc = None
         self._fastlio_started_at = None
+        
+        # 重定位状态相关
+        self.relocalization_success = False
+        self.reloc_subscriber = None
 
         self.load_actions()
         self.setup_publisher()
@@ -485,7 +489,7 @@ class G1ActionPlayer:
                 num_insert_frames = int(np.ceil(dynamic_frames * base_frames))
                 num_insert_frames = max(1, min(num_insert_frames, 30))  # 增加最大插帧数到30以适应剧烈动作
                 
-                print(f"⚠️  检测到剧烈运动: 帧 {i}-{i+1}, 最大角度变化 {max_delta:.3f} rad, 插入 {num_insert_frames} 帧")
+               #  print(f"⚠️  检测到剧烈运动: 帧 {i}-{i+1}, 最大角度变化 {max_delta:.3f} rad, 插入 {num_insert_frames} 帧")
                 
                 # 使用更高阶的插值方法（三次样条插值效果更好）
                 for j in range(1, num_insert_frames + 1):
@@ -1591,7 +1595,7 @@ class G1ActionPlayer:
                     if result != 0:
                         print(f"⚠️  TTS播放重试失败，错误码: {result}")
                 # 等待播放完成，但定期检查中断信号
-                wait_time = max(2.0, min(28.0, len(text) * 0.2))  # 每字符0.2秒，最多等待15秒
+                wait_time = max(2.0, min(25.0, len(text) * 0.2))  # 每字符0.2秒，最多等待15秒
                 print(f"[DEBUG] TTS文本长度: {len(text)}, 等待时间: {wait_time:.1f}秒")
                 elapsed = 0
                 check_interval = 1.0  # 每秒检查一次中断信号
@@ -1649,7 +1653,7 @@ class G1ActionPlayer:
             
             # 播放开始预设动作（high five仅用于start_a）
             start_action_executed = False
-            if self.arm_action_client and self.action_map and action_dir_name == "start_a":
+            if self.arm_action_client and self.action_map and action_dir_name == "start_b":
                 print("💪 播放开始预设动作: high five")
                 self.arm_action_client.ExecuteAction(self.action_map.get("high five"))
                 start_action_executed = True
@@ -1672,7 +1676,7 @@ class G1ActionPlayer:
                 # 播放结束预设动作
                 if self.arm_action_client and self.action_map:
                     try:
-                        if action_dir_name == "start_a" and start_action_executed:
+                        if action_dir_name == "start_b" and start_action_executed:
                             print("💪 播放结束预设动作: right heart")
                             # 添加3秒延迟再播放结束动作
                             time.sleep(3)
@@ -1682,8 +1686,8 @@ class G1ActionPlayer:
                             self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
                         elif action_dir_name == "start_x":
                             print("💪 播放结束预设动作: high wave")
-                            # 添加3秒延迟再播放结束动作
-                            time.sleep(3)
+                            # 添加1秒延迟再播放结束动作
+                            time.sleep(1)
                             self.arm_action_client.ExecuteAction(self.action_map.get("high wave"))
                             time.sleep(2)
                             # 释放手臂
@@ -1702,7 +1706,7 @@ class G1ActionPlayer:
                 # 播放结束预设动作
                 if self.arm_action_client and self.action_map:
                     try:
-                        if action_dir_name == "start_a":
+                        if action_dir_name == "start_b":
                             print("💪 播放结束预设动作: right heart")
                             # 添加3秒延迟再播放结束动作
                             time.sleep(3)
@@ -1712,8 +1716,8 @@ class G1ActionPlayer:
                             self.arm_action_client.ExecuteAction(self.action_map.get("release arm"))
                         elif action_dir_name == "start_x":
                             print("💪 播放结束预设动作: high wave")
-                            # 添加3秒延迟再播放结束动作
-                            time.sleep(3)
+                            # 添加1秒延迟再播放结束动作
+                            time.sleep(1)
                             self.arm_action_client.ExecuteAction(self.action_map.get("high wave"))
                             time.sleep(2)
                             # 释放手臂
@@ -1767,7 +1771,7 @@ class G1ActionPlayer:
                 # 播放结束预设动作
                 if self.arm_action_client and self.action_map:
                     try:
-                        if action_dir_name == "start_a" and start_action_executed:
+                        if action_dir_name == "start_b" and start_action_executed:
                             print("💪 播放结束预设动作: right heart")
                             self.arm_action_client.ExecuteAction(self.action_map.get("right heart"))
                             time.sleep(2)
@@ -2288,6 +2292,11 @@ class G1ActionPlayer:
             
             # 启动重定位监测
             if self._fastlio_proc is not None:
+                # 订阅重定位状态话题
+                if rospy is not None:
+                    self.reloc_subscriber = rospy.Subscriber('/relocalization_success', Bool, self._relocalization_callback)
+                    print("📡 已订阅重定位状态话题")
+                
                 import threading
                 monitoring_thread = threading.Thread(target=self._monitor_relocalization)
                 monitoring_thread.daemon = True
@@ -2313,12 +2322,11 @@ class G1ActionPlayer:
         检查重定位是否成功。
         返回 True 表示重定位成功，可以触发 new_plan。
         """
-        # 主要依赖重定位状态检测，不依赖导航进程状态
-        # 因为用户可能单独启动了导航和重定位
-        return self._check_relocalization_status()
+        # 使用重定位成功标志
+        return self.relocalization_success
 
     def _monitor_relocalization(self):
-        """监测重定位状态"""
+        """监测重定位状态 - 简化版，只监测话题消息"""
         try:
             print("🔍 开始监测重定位状态...")
             
@@ -2326,7 +2334,7 @@ class G1ActionPlayer:
             print("⏳ 等待系统启动...")
             time.sleep(8)
             
-            # 监测30秒 (增加监测时间)
+            # 监测30秒
             start_time = time.time()
             timeout = 30.0
             
@@ -2336,10 +2344,9 @@ class G1ActionPlayer:
                 elapsed = time.time() - start_time
                 print(f"⏰ 监测中... ({elapsed:.1f}s/{timeout}s)")
                 
-                if self._check_relocalization_status():
+                # 检查重定位成功标志
+                if self.relocalization_success:
                     print("✅ 重定位成功!")
-                    if hasattr(self, 'audio_processor') and hasattr(self.audio_processor, 'audio_client'):
-                        self.audio_processor.audio_client.TtsMaker("重定位成功，导航已就绪，十秒后可按方向键触发动作", 0)
                     return True
                 
                 time.sleep(2)  # 每2秒检查一次，减少系统负载
@@ -2356,61 +2363,6 @@ class G1ActionPlayer:
             print(f"❌ 重定位监测失败: {e}")
             return False
     
-    def _check_relocalization_status(self):
-        """检查重定位状态"""
-        try:
-            import subprocess
-            
-            # 方法1: 检查重定位服务状态 (最准确)
-            result = subprocess.run(
-                ["rosservice", "call", "/slam_reloc_check", "{}"],
-                capture_output=True, text=True, check=False, timeout=3
-            )
-            
-            if result.returncode == 0:
-                # 解析服务返回结果
-                if "status: True" in result.stdout or "status: 1" in result.stdout:
-                    print("📍 重定位服务确认成功")
-                    return True
-                elif "status: False" in result.stdout or "status: 0" in result.stdout:
-                    print("📍 重定位服务确认失败")
-                    return False
-            
-            # 方法2: 检查重定位节点是否还在运行 (间接判断)
-            result = subprocess.run(
-                ["pgrep", "-f", "one_key_reloc_node"],
-                capture_output=True, text=True, check=False
-            )
-            
-            # 如果重定位节点已经退出，说明重定位完成
-            if result.returncode != 0:  # 进程不存在
-                print("📍 重定位节点已退出，检查定位质量...")
-                
-                # 检查tf变换是否正常
-                tf_result = subprocess.run(
-                    ["rostopic", "echo", "/tf", "-n", "1", "--timeout", "2"],
-                    capture_output=True, text=True, check=False
-                )
-                
-                if tf_result.returncode == 0 and "map" in tf_result.stdout and "base_link" in tf_result.stdout:
-                    print("📍 检测到tf变换正常，重定位成功")
-                    return True
-            
-            # 方法3: 检查amcl_pose话题 (备用检查)
-            result = subprocess.run(
-                ["rostopic", "echo", "/amcl_pose", "-n", "1", "--timeout", "2"],
-                capture_output=True, text=True, check=False
-            )
-            
-            if result.returncode == 0 and result.stdout.strip():
-                print("📍 检测到amcl_pose话题正常，定位成功")
-                return True
-            
-            return False
-            
-        except Exception as e:
-            print(f"⚠️ 检查重定位状态时出错: {e}")
-            return False
 
     def _save_original_volume(self):
         """保存原始音量设置"""
@@ -2567,6 +2519,15 @@ class G1ActionPlayer:
                 except Exception as e:
                     print(f"⚠️ 清理音频处理器时出错: {e}")
             
+            # 取消订阅重定位话题
+            if hasattr(self, 'reloc_subscriber') and self.reloc_subscriber is not None:
+                try:
+                    self.reloc_subscriber.unregister()
+                    self.reloc_subscriber = None
+                    print("✅ 重定位话题订阅已取消")
+                except Exception as e:
+                    print(f"⚠️ 取消重定位话题订阅时出错: {e}")
+            
             # 关闭导航系统
             self._shutdown_navigation_systems()
             
@@ -2574,6 +2535,20 @@ class G1ActionPlayer:
             
         except Exception as e:
             print(f"❌ 清理资源时出错: {e}")
+    
+    def _relocalization_callback(self, msg):
+        """重定位状态话题回调函数"""
+        try:
+            if msg.data:
+                print("✅ 收到重定位成功消息")
+                self.relocalization_success = True
+                if hasattr(self, 'audio_processor') and hasattr(self.audio_processor, 'audio_client'):
+                    self.audio_processor.audio_client.TtsMaker("崇定位成功，导航已就绪", 0)
+            else:
+                print("❌ 收到重定位失败消息")
+                self.relocalization_success = False
+        except Exception as e:
+            print(f"⚠️ 处理重定位消息时出错: {e}")
     
     def __del__(self):
         """析构函数，确保资源被清理"""
@@ -3150,7 +3125,7 @@ def main(return_remote=False):
                             player._start_fastlio_navigation()
                             # 反馈一次TTS（可选）
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                player.audio_processor.audio_client.TtsMaker("启动导航", 0)
+                                player.audio_processor.audio_client.TtsMaker("导航程序初始化，请稍候", 0)
                         except Exception as e:
                             print(f"[fastlio] 触发失败: {e}")
                         
@@ -3233,7 +3208,7 @@ def main(return_remote=False):
                                     "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'X'"
                                 ])
                                 if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                    player.audio_processor.audio_client.TtsMaker("开始表演 军民鱼水情", 0)
+                                    player.audio_processor.audio_client.TtsMaker("开始表演军军民鱼水情", 0)
                             except Exception as e:
                                 print(f"[mock_dance] 启动失败: {e}")
                         else:
@@ -3276,7 +3251,7 @@ def main(return_remote=False):
                                 "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Up'"
                             ])
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                player.audio_processor.audio_client.TtsMaker("上台", 0)
+                                player.audio_processor.audio_client.TtsMaker("准备开场白", 0)
                         except Exception as e:
                             print(f"[mock_dance] 启动失败: {e}")
                     else:
@@ -3294,7 +3269,7 @@ def main(return_remote=False):
                                 "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Down'"
                             ])
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
-                                player.audio_processor.audio_client.TtsMaker("下台", 0)
+                                player.audio_processor.audio_client.TtsMaker("准备闭幕词", 0)
                         except Exception as e:
                             print(f"[mock_dance] 启动失败: {e}")
                     else:
@@ -3407,16 +3382,8 @@ def main(return_remote=False):
                     time.sleep(0.05)  # 50ms延迟
             else:
                 # 功能未激活时，让机器人可以正常响应遥控器控制
-                # 确保臂部控制被禁用，以便遥控器可以控制
-                try:
-                    player.low_cmd.motor_cmd[G1JointIndex.kArmSdkEnable].q = 0.0
-                    player.low_cmd.crc = player.crc.Crc(player.low_cmd)
-                    if player.publisher is not None:
-                        player.publisher.Write(player.low_cmd)
-                except Exception as e:
-                    print(f"⚠️ 禁用臂部控制时出错: {e}")
+                # 不主动发送任何控制命令，避免干扰遥控器
                 
-                # 不再主动发送停止命令或回到零位命令
                 # 只有在动作播放时才停止
                 if player.state not in ["stopped", "move_to_initial"]:
                     print("⚠️  功能未激活，正在停止当前动作...")

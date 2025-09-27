@@ -7,6 +7,7 @@ import yaml
 from fastlio.srv import SlamReLoc, SlamReLocRequest
 from fastlio.srv import SlamRelocCheck, SlamRelocCheckRequest
 from std_srvs.srv import Empty
+from std_msgs.msg import Bool
 
 # --- 服务调用封装 ---
 
@@ -58,6 +59,9 @@ def check_reloc_status():
 
 def main():
     rospy.init_node('one_key_reloc_node', anonymous=True)
+    
+    # 创建发布者，用于发布重定位成功消息
+    reloc_success_pub = rospy.Publisher('/relocalization_success', Bool, queue_size=1, latch=True)
 
     # 1. 从参数服务器加载配置
     # 使用 rosparam load 命令将 YAML 文件加载到参数服务器
@@ -111,6 +115,13 @@ def main():
             rospy.loginfo("SUCCESS! Relocalization successful at yaw: %.2f degrees", yaw_deg)
             rospy.loginfo("======================================================")
             reloc_success = True
+            
+            # 发布重定位成功消息
+            success_msg = Bool()
+            success_msg.data = True
+            reloc_success_pub.publish(success_msg)
+            rospy.loginfo("Published relocalization success message")
+            
             break
         else:
             rospy.logwarn("Relocalization failed at yaw %.1f. Trying next angle.", yaw_deg)
@@ -119,6 +130,12 @@ def main():
         rospy.logerr("======================================================")
         rospy.logerr("FAILURE: Auto-relocalization failed after trying all angles.")
         rospy.logerr("======================================================")
+        
+        # 发布重定位失败消息
+        failure_msg = Bool()
+        failure_msg.data = False
+        reloc_success_pub.publish(failure_msg)
+        rospy.loginfo("Published relocalization failure message")
 
 if __name__ == '__main__':
     try:

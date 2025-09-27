@@ -14,7 +14,7 @@ TebLocalPlannerROS:
     global_plan_prune_distance: 0.3
     exact_arc_length: False
     feasibility_check_no_poses: 5
-    publish_feedback: False
+    publish_feedback: True
 
     # Robot
 
@@ -28,7 +28,7 @@ TebLocalPlannerROS:
 
     footprint_model: # types: "point", "circular", "two_circles", "line", "polygon"
         type: "circular"
-        radius: 0.3 # for type "circular"
+        radius: 0.2 # for type "circular"
         line_start: [0.0, 0.0] # for type "line"
         line_end: [0.2, 0.0] # for type "line"
         front_offset: 0.2 # for type "two_circles"
@@ -46,8 +46,8 @@ TebLocalPlannerROS:
 
     # Obstacles
 
-    min_obstacle_dist: 0.1 #
-    inflation_dist: 0.2
+    min_obstacle_dist: 0.05 #
+    inflation_dist: 0.1
     include_costmap_obstacles: True
     costmap_obstacles_behind_robot_dist: 1.5
     obstacle_poses_affected: 15
@@ -64,7 +64,7 @@ TebLocalPlannerROS:
     no_inner_iterations: 4
     no_outer_iterations: 3
     optimization_activate: True
-    optimization_verbose: False
+    optimization_verbose: True
     penalty_epsilon: 0.03
     obstacle_cost_exponent: 4
     weight_max_vel_x: 2
