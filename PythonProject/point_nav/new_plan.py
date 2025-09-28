@@ -388,48 +388,13 @@ class SimpleNavWaypointPlayer:
             return f"[舞蹈位置 {waypoint_index+1}]"
     
     def _schedule_final_shutdown(self):
-        """延迟关闭程序，给机器人时间完成最后的导航"""
-        rospy.loginfo("设置延迟关闭定时器，等待机器人完成最后的导航...")
-        
-        # 获取后台点位置
-        if self.waypoints:
-            backstage_pos = self.waypoints[-1]
-            rospy.loginfo(f"等待机器人到达后台点: {backstage_pos}")
-            
-            # 设置位置监控定时器，检查是否到达后台点
-            self._monitor_final_position(backstage_pos)
-        
-        # 设置最大超时关闭定时器（30秒）
-        shutdown_timer = rospy.Timer(
-            rospy.Duration(30.0), self._final_shutdown, oneshot=True
-        )
-        self._timers.append(shutdown_timer)
+        """等待g1_control的停止信息来关闭程序"""
+        rospy.loginfo("等待g1_control的停止信息来关闭程序...")
+        # 不需要设置定时器，只等待g1_control的停止信息
     
-    def _monitor_final_position(self, target_pos):
-        """监控机器人是否到达最终位置"""
-        def check_position(event):
-            if self.reached_final:
-                # 检查是否到达后台点
-                dx = self.current_position["x"] - target_pos[0]
-                dy = self.current_position["y"] - target_pos[1]
-                distance = math.sqrt(dx*dx + dy*dy)
-                
-                rospy.loginfo(f"距离后台点还有: {distance:.2f}米")
-                
-                if distance < 0.5:  # 如果距离小于0.3米，认为已到达
-                    rospy.loginfo("机器人已到达后台点，可以安全关闭程序")
-                    # 提前关闭程序
-                    self._final_shutdown(None)
-        
-        # 每2秒检查一次位置
-        position_timer = rospy.Timer(
-            rospy.Duration(2.0), check_position, oneshot=False
-        )
-        self._timers.append(position_timer)
-    
-    def _final_shutdown(self, event):
-        """最终关闭程序"""
-        rospy.loginfo("延迟关闭时间到，程序即将退出")
+    def _final_shutdown(self):
+        """最终关闭程序 - 由g1_control的停止信息触发"""
+        rospy.loginfo("程序即将关闭")
         rospy.signal_shutdown("任务完成")
         import sys
         sys.exit(0)
@@ -601,7 +566,7 @@ class SimpleNavWaypointPlayer:
             self.schedule_next_waypoint()
     
     def arrival_callback(self, msg):
-        """接收机器人到达状态"""
+        """接收机器人到达状态 - 唯一的程序关闭监测点"""
         current_state = self.get_state()
         if current_state != NavigationState.NAVIGATING:
             return
@@ -609,6 +574,10 @@ class SimpleNavWaypointPlayer:
         if msg.data == "arrived":
             rospy.loginfo("收到机器人到达状态，开始处理航点到达逻辑")
             self._handle_waypoint_arrival()
+        elif msg.data == "stopped" and self.reached_final:
+            # 这是唯一的程序关闭条件：g1_control报告机器人已停止且所有航点已完成
+            rospy.loginfo("收到g1_control停止信息，机器人已到达后台点，程序即将关闭")
+            self._final_shutdown()
     
     def cmd_vel_callback(self, msg):
         """监控cmd_vel以检测机器人停止"""
@@ -972,92 +941,25 @@ class SimpleNavWaypointPlayer:
             self._timers.append(self.plan_failure_timer)
 
     def check_force_return_success(self, event):
-        """检查强制返回是否成功"""
-        current_state = self.get_state()
-        if current_state == NavigationState.NAVIGATING:
-            # 检查是否到达后台点
-            dx = self.current_position["x"] - (-0.6)
-            dy = self.current_position["y"] - 0.0
-            distance = math.sqrt(dx*dx + dy*dy)
-            
-            if distance < 0.3:  # 如果距离后台点小于0.3米
-                rospy.loginfo("强制返回成功，已到达后台点")
-                self.set_state(NavigationState.COMPLETED)
-                rospy.loginfo("全局时间超时，任务强制完成")
-                rospy.signal_shutdown("全局时间超时完成")
-                import sys
-                sys.exit(0)
-            else:
-                rospy.logwarn(f"强制返回超时，距离后台点还有 {distance:.2f}米，尝试RViz风格备用航点...")
-                # 使用RViz风格的备用航点策略
-                self._try_rviz_style_backstage_approach()
+        """检查强制返回是否成功 - 简化版本，只等待g1_control停止信息"""
+        rospy.loginfo("强制返回已启动，等待g1_control停止信息...")
+        # 不再检查位置，只等待g1_control的停止信息
 
     def _try_rviz_style_backstage_approach(self):
-        """RViz风格的备用后台点策略 - 在后台点附近尝试多个位置"""
-        rospy.loginfo("尝试RViz风格备用后台点策略...")
+        """简化的后台点策略 - 只发布后台点目标，等待g1_control停止信息"""
+        rospy.loginfo("发布后台点目标，等待g1_control停止信息...")
         
-        # 原始后台点
-        original_backstage = (-0.6, 0, 0)
-        
-        # 生成备用后台点列表（模拟RViz手动点击的位置）
-        alternative_backstage_points = [
-            (-0.5, 0, 0),      # 稍微向右
-            (-0.7, 0, 0),      # 稍微向左  
-            (-0.6, 0.1, 0),     # 稍微向前
-            (-0.6, -0.1, 0),    # 稍微向后
-            (-0.4, 0, 0),       # 更向右
-            (-0.8, 0, 0),       # 更向左
-            (-0.6, 0.2, 0),     # 更向前
-            (-0.6, -0.2, 0),    # 更向后
-        ]
-        
-        # 尝试每个备用点
-        for i, (x, y, theta) in enumerate(alternative_backstage_points):
-            rospy.loginfo(f"尝试备用后台点 {i+1}/{len(alternative_backstage_points)}: ({x}, {y}, {theta})")
-            
-            # 取消当前目标
-            cancel_msg = GoalID()
-            self.cancel_pub.publish(cancel_msg)
-            rospy.sleep(0.5)
-            
-            # 发布备用目标
-            goal_msg = self._build_move_base_goal(x, y, theta)
-            self.goal_pub.publish(goal_msg)
-            
-            # 等待一段时间看是否成功
-            rospy.sleep(3.0)
-            
-            # 检查是否开始移动
-            current_dx = self.current_position["x"] - (-0.6)
-            current_dy = self.current_position["y"] - 0.0
-            current_distance = math.sqrt(current_dx*current_dx + current_dy*current_dy)
-            
-            # 如果距离后台点很近，认为成功
-            if current_distance < 0.5:
-                rospy.loginfo(f"✅ 备用后台点 {i+1} 成功，距离后台点 {current_distance:.2f}米")
-                # 设置成功检测定时器
-                self.plan_failure_timer = rospy.Timer(
-                    rospy.Duration(10.0), self.check_force_return_success, oneshot=True
-                )
-                self._timers.append(self.plan_failure_timer)
-                return
-            else:
-                rospy.logwarn(f"备用后台点 {i+1} 未成功，继续尝试下一个...")
-        
-        # 如果所有备用点都失败，最后尝试原始后台点
-        rospy.logwarn("所有备用后台点都失败，最后尝试原始后台点...")
+        # 取消当前目标
         cancel_msg = GoalID()
         self.cancel_pub.publish(cancel_msg)
         rospy.sleep(0.5)
         
-        goal_msg = self._build_move_base_goal(original_backstage[0], original_backstage[1], original_backstage[2])
+        # 发布后台点目标
+        backstage_pos = (-0.6, 0, 0)
+        goal_msg = self._build_move_base_goal(backstage_pos[0], backstage_pos[1], backstage_pos[2])
         self.goal_pub.publish(goal_msg)
         
-        # 设置最终检测定时器
-        self.plan_failure_timer = rospy.Timer(
-            rospy.Duration(15.0), self.check_force_return_success, oneshot=True
-        )
-        self._timers.append(self.plan_failure_timer)
+        rospy.loginfo("后台点目标已发布，等待g1_control停止信息...")
 
     def navigate_to_current_waypoint(self, is_retry=False):
         """Navigate to the current waypoint with error handling"""
@@ -1476,6 +1378,8 @@ if __name__ == "__main__":
 
     backstage_pos = (-0.6, 0, 0)
 
+
+    
     dance_choreography = {
        #祖国的好山河 - 全局时间310秒  4*60+55=295
        # Start + Up:
@@ -1486,7 +1390,7 @@ if __name__ == "__main__":
                
                 ((-2.2, 3.0, 180), 30.0),
                 ((-2.6, 3.4, 180), 40.0),
-                ((-3.0, 3.4, -170), 20.0),
+                ((-3.0, 3.4, -170), 20.0),   
                 ((-2.2, 3.0, 180), 30.0),
                 ((-2.6, 3.4, 180), 40.0),
                 ((-3.0, 3.4, -170), 20.0),
@@ -1575,16 +1479,18 @@ if __name__ == "__main__":
                #  90s   换位  
                 ((-2.75, 3.8, -170), 60.0),  
                 
-                #140s     背对 观众
+                #150s     背对 观众
                 ((-2.0, 3.0, 0), 65.0), 
                 
-                    #3*60+40=220s  右边桌子
-                ((-2.8, 3.2, 180), 40.0),  
-                #4*60+20=260s  靠墙壁 
-                ((-2.0, 2.6, 180), 160.0), 
-                ((-2.0, 2.6, 180), 160.0), 
+                    #3*60+40=220s  右边桌子   215    5*60+15=315
+                ((-3.0, 3.5, 180), 40.0),  
+                #4*60+20=260s  靠墙壁    255
+                ((-1.8, 2.0, 150), 60.0), 
+                #  5*60+15=315
+                ((-2.8, 1.8, 120), 75.0), 
+                
                 #7*60=420s  
-                ((-3.0, 3.2, -160), 55.0),     
+                ((-3.2, 2.0, 160), 55.0),     
                 ((-2.3, 2.9, 175), 30.0),
                 ((-2.9, 2.6, -175), 30.0),
                 ((-2.1, 2.8, 165), 30.0),
@@ -1606,7 +1512,7 @@ if __name__ == "__main__":
         },
         # 上台 - 全局时间50秒
         "Up": {
-            "global_time": 42.0,
+            "global_time": 40.0,
             "waypoints": [
                 ((-2.6, 3.4, 180), 40.0),
                 ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
@@ -1616,7 +1522,7 @@ if __name__ == "__main__":
         
         #下台 - 全局时间50秒
          "Down": {
-            "global_time": 40.0,
+            "global_time": 38.0,
             "waypoints": [
                 ((-2.6, 3.4, 170), 30.0),
                 ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
@@ -1624,6 +1530,8 @@ if __name__ == "__main__":
             ]
         },
     }
+    
+    
     # 所有模式都使用导航舞蹈逻辑，包括Up和Down
     node = SimpleNavWaypointPlayer(
         backstage_pos=backstage_pos,

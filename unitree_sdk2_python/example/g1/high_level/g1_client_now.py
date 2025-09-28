@@ -2403,7 +2403,7 @@ class G1ActionPlayer:
     def _set_volume_to_minimum(self):
         """将音量设置为最小"""
         #暂时  最后改成0
-        return self._set_volume(70)
+        return self._set_volume(100)
     
     def _restore_original_volume(self):
         """恢复原始音量"""
@@ -3073,6 +3073,11 @@ def main(return_remote=False):
                                 player._last_cancel_tts_time = current_time
                         except Exception as e:
                             print(f"❌ 播放提示音时出错: {e}")
+                        
+                        # 关闭所有 new_plan 相关程序
+                        print("🛑 正在关闭 new_plan 相关程序...")
+                        player._check_and_kill_new_plan_processes()
+                        
                         player.stop_play()
                     # 如果当前正在回到初始姿态过程中，也可以强制停止
                     elif player.state == "move_to_initial":
@@ -3087,6 +3092,11 @@ def main(return_remote=False):
                                 player._last_cancel_tts_time = current_time
                         except Exception as e:
                             print(f"❌ 播放提示音时出错: {e}")
+                        
+                        # 关闭所有 new_plan 相关程序
+                        print("🛑 正在关闭 new_plan 相关程序...")
+                        player._check_and_kill_new_plan_processes()
+                        
                         # 直接设置为停止状态并停止音频
                         player.state = "stopped"
                         player._stop_audio_playback()
