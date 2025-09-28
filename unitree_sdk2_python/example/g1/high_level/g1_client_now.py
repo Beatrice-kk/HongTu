@@ -2416,18 +2416,60 @@ class G1ActionPlayer:
         """
         检查并关闭所有 new_plan 相关进程
         不管参数是什么，先关闭再启动新的
+        加入更彻底的服务释放逻辑，但减少等待时间避免阻塞
         """
         try:
             print("🔍 检查是否有 new_plan 程序在运行...")
             
-            # 使用 pkill 关闭所有 new_plan 相关进程
+            # 第一步：优雅关闭 new_plan 进程
             result = subprocess.run(["pkill", "-f", "new_plan"], 
                                   capture_output=True, text=True, check=False)
             
             if result.returncode == 0:
                 print("🛑 发现并关闭了 new_plan 相关进程")
-                # 等待一下确保进程完全关闭
-                time.sleep(0.5)
+                # 减少等待时间，避免阻塞主程序
+                time.sleep(0.3)
+                
+                # 第二步：检查是否还有残留进程，强制终止
+                check_result = subprocess.run(["pgrep", "-f", "new_plan"], 
+                                           capture_output=True, text=True, check=False)
+                if check_result.returncode == 0:
+                    print("⚠️ 发现残留进程，强制终止...")
+                    subprocess.run(["pkill", "-9", "-f", "new_plan"], 
+                                 capture_output=True, text=True, check=False)
+                    time.sleep(0.2)
+                
+                # 第三步：清理 ROS 服务相关资源（异步执行，不阻塞）
+                print("🧹 清理 ROS 服务相关资源...")
+                try:
+                    # 异步执行清理命令，避免阻塞
+                    import threading
+                    def cleanup_ros_resources():
+                        try:
+                            # 取消所有导航目标
+                            subprocess.run(["rostopic", "pub", "/move_base/cancel", "actionlib_msgs/GoalID", "{}"], 
+                                         capture_output=True, text=True, check=False, timeout=2)
+                            
+                            # 停止机器人运动
+                            subprocess.run(["rostopic", "pub", "/cmd_vel", "geometry_msgs/Twist", 
+                                           "linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}"], 
+                                         capture_output=True, text=True, check=False, timeout=2)
+                            
+                            # 发送停止舞蹈服务命令
+                            subprocess.run(["rostopic", "pub", "/play_dance", "std_msgs/String", "data: 'stop'"], 
+                                         capture_output=True, text=True, check=False, timeout=2)
+                            
+                            print("✅ ROS 服务资源已清理")
+                        except Exception as cleanup_e:
+                            print(f"⚠️ 清理 ROS 服务时出错: {cleanup_e}")
+                    
+                    # 在后台线程中执行清理，不阻塞主程序
+                    cleanup_thread = threading.Thread(target=cleanup_ros_resources, daemon=True)
+                    cleanup_thread.start()
+                    
+                except Exception as cleanup_e:
+                    print(f"⚠️ 启动清理线程时出错: {cleanup_e}")
+                
             else:
                 print("✅ 没有发现运行中的 new_plan 进程")
                 

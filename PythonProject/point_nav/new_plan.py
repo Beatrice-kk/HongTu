@@ -392,6 +392,29 @@ class SimpleNavWaypointPlayer:
         rospy.loginfo("等待g1_control的停止信息来关闭程序...")
         # 不需要设置定时器，只等待g1_control的停止信息
     
+    def _check_backstage_arrival(self):
+        """检查机器人是否真正到达后台点"""
+        if not self.waypoints:
+            return False
+            
+        # 获取后台点位置
+        backstage_pos = self.waypoints[-1]
+        
+        # 计算距离
+        dx = self.current_position["x"] - backstage_pos[0]
+        dy = self.current_position["y"] - backstage_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        rospy.loginfo(f"距离后台点还有: {distance:.2f}米")
+        
+        # 如果距离小于0.3米，认为已到达
+        if distance < 0.3:
+            rospy.loginfo(f"✅ 机器人已到达后台点 (距离: {distance:.2f}米 < 0.3米)")
+            return True
+        else:
+            rospy.loginfo(f"⏳ 机器人尚未到达后台点 (距离: {distance:.2f}米 >= 0.3米)")
+            return False
+    
     def _final_shutdown(self):
         """最终关闭程序 - 由g1_control的停止信息触发"""
         rospy.loginfo("程序即将关闭")
@@ -573,11 +596,16 @@ class SimpleNavWaypointPlayer:
             
         if msg.data == "arrived":
             rospy.loginfo("收到机器人到达状态，开始处理航点到达逻辑")
-            self._handle_waypoint_arrival()
-        elif msg.data == "stopped" and self.reached_final:
-            # 这是唯一的程序关闭条件：g1_control报告机器人已停止且所有航点已完成
-            rospy.loginfo("收到g1_control停止信息，机器人已到达后台点，程序即将关闭")
-            self._final_shutdown()
+            # 检查是否是最后一个航点（后台点）
+            if self.current_waypoint_index == len(self.waypoints) - 1:
+                # 检查机器人当前位置是否真正到达后台点（距离小于0.3米）
+                if self._check_backstage_arrival():
+                    rospy.loginfo("机器人已真正到达后台点，程序即将关闭")
+                    self._final_shutdown()
+                else:
+                    rospy.loginfo("机器人尚未真正到达后台点，继续等待...")
+            else:
+                self._handle_waypoint_arrival()
     
     def cmd_vel_callback(self, msg):
         """监控cmd_vel以检测机器人停止"""
@@ -946,20 +974,190 @@ class SimpleNavWaypointPlayer:
         # 不再检查位置，只等待g1_control的停止信息
 
     def _try_rviz_style_backstage_approach(self):
-        """简化的后台点策略 - 只发布后台点目标，等待g1_control停止信息"""
-        rospy.loginfo("发布后台点目标，等待g1_control停止信息...")
+        """RViz风格的后台点备用策略 - 在后台点附近尝试多个位置"""
+        rospy.loginfo("尝试RViz风格后台点备用策略...")
         
-        # 取消当前目标
+        # 原始后台点
+        original_backstage = (-0.6, 0, 0)
+        
+        # 生成备用后台点列表（模拟RViz手动点击的位置）
+        alternative_backstage_points = [
+            (-0.5, 0, 0),      # 稍微向右
+            (-0.7, 0, 0),      # 稍微向左  
+            (-0.6, 0.1, 0),     # 稍微向前
+            (-0.6, -0.1, 0),    # 稍微向后
+            (-0.4, 0, 0),       # 更向右
+            (-0.8, 0, 0),       # 更向左
+            (-0.6, 0.2, 0),     # 更向前
+            (-0.6, -0.2, 0),    # 更向后
+            (-0.3, 0, 0),       # 很向右
+            (-0.9, 0, 0),       # 很向左
+            (-0.6, 0.3, 0),     # 很向前
+            (-0.6, -0.3, 0),    # 很向后
+        ]
+        
+        # 尝试每个备用点
+        for i, (x, y, theta) in enumerate(alternative_backstage_points):
+            rospy.loginfo(f"尝试备用后台点 {i+1}/{len(alternative_backstage_points)}: ({x}, {y}, {theta})")
+            
+            # 取消当前目标
+            cancel_msg = GoalID()
+            self.cancel_pub.publish(cancel_msg)
+            rospy.sleep(0.5)
+            
+            # 发布备用目标
+            goal_msg = self._build_move_base_goal(x, y, theta)
+            self.goal_pub.publish(goal_msg)
+            
+            # 等待一段时间看是否成功
+            rospy.sleep(3.0)
+            
+            # 检查是否开始移动
+            current_dx = self.current_position["x"] - self.last_position_check["x"]
+            current_dy = self.current_position["y"] - self.last_position_check["y"]
+            current_dist_moved = math.hypot(current_dx, current_dy)
+            
+            # 如果开始移动，认为成功
+            if current_dist_moved > 0.1:
+                rospy.loginfo(f"✅ 备用后台点 {i+1} 成功，机器人开始移动 {current_dist_moved:.3f}米")
+                return
+            else:
+                rospy.logwarn(f"备用后台点 {i+1} 未成功，继续尝试下一个...")
+        
+        # 如果所有备用点都失败，最后尝试原始后台点
+        rospy.logwarn("所有备用后台点都失败，最后尝试原始后台点...")
         cancel_msg = GoalID()
         self.cancel_pub.publish(cancel_msg)
         rospy.sleep(0.5)
         
-        # 发布后台点目标
-        backstage_pos = (-0.6, 0, 0)
-        goal_msg = self._build_move_base_goal(backstage_pos[0], backstage_pos[1], backstage_pos[2])
+        goal_msg = self._build_move_base_goal(original_backstage[0], original_backstage[1], original_backstage[2])
         self.goal_pub.publish(goal_msg)
         
-        rospy.loginfo("后台点目标已发布，等待g1_control停止信息...")
+        rospy.loginfo("原始后台点目标已发布，等待g1_control停止信息...")
+
+    def _try_rviz_style_first_waypoint_approach(self):
+        """RViz风格的第一个航点备用策略 - 在第一个航点附近尝试多个位置"""
+        rospy.loginfo("尝试RViz风格第一个航点备用策略...")
+        
+        # 获取原始第一个航点位置
+        original_waypoint = self.waypoints[self.current_waypoint_index]
+        x, y, theta = original_waypoint
+        
+        # 生成备用第一个航点列表（模拟RViz手动点击的位置）
+        alternative_first_waypoints = [
+            (x + 0.2, y, theta),      # 稍微向右
+            (x - 0.2, y, theta),      # 稍微向左  
+            (x, y + 0.2, theta),      # 稍微向前
+            (x, y - 0.2, theta),      # 稍微向后
+            (x + 0.1, y + 0.1, theta), # 稍微向右前
+            (x - 0.1, y + 0.1, theta), # 稍微向左前
+            (x + 0.1, y - 0.1, theta), # 稍微向右后
+            (x - 0.1, y - 0.1, theta), # 稍微向左后
+            (x + 0.3, y, theta),      # 更向右
+            (x - 0.3, y, theta),      # 更向左
+            (x, y + 0.3, theta),      # 更向前
+            (x, y - 0.3, theta),      # 更向后
+        ]
+        
+        # 尝试每个备用点
+        for i, (alt_x, alt_y, alt_theta) in enumerate(alternative_first_waypoints):
+            rospy.loginfo(f"尝试备用第一个航点 {i+1}/{len(alternative_first_waypoints)}: ({alt_x}, {alt_y}, {alt_theta})")
+            
+            # 取消当前目标
+            cancel_msg = GoalID()
+            self.cancel_pub.publish(cancel_msg)
+            rospy.sleep(0.5)
+            
+            # 临时修改当前航点
+            self.waypoints[self.current_waypoint_index] = (alt_x, alt_y, alt_theta)
+            
+            # 发布备用目标
+            goal_msg = self._build_move_base_goal(alt_x, alt_y, alt_theta)
+            self.goal_pub.publish(goal_msg)
+            
+            # 等待一段时间看是否成功
+            rospy.sleep(3.0)
+            
+            # 检查是否开始移动
+            current_dx = self.current_position["x"] - self.last_position_check["x"]
+            current_dy = self.current_position["y"] - self.last_position_check["y"]
+            current_dist_moved = math.hypot(current_dx, current_dy)
+            
+            # 如果开始移动，认为成功
+            if current_dist_moved > 0.1:
+                rospy.loginfo(f"✅ 备用第一个航点 {i+1} 成功，机器人开始移动 {current_dist_moved:.3f}米")
+                # 恢复原始航点位置
+                self.waypoints[self.current_waypoint_index] = original_waypoint
+                return
+            else:
+                rospy.logwarn(f"备用第一个航点 {i+1} 未成功，继续尝试下一个...")
+        
+        # 如果所有备用点都失败，恢复原始位置并跳过
+        rospy.logwarn("所有备用第一个航点都失败，跳过第一个航点...")
+        self.waypoints[self.current_waypoint_index] = original_waypoint
+        self.force_move_to_next_waypoint()
+
+    def _try_rviz_style_doorway_approach(self):
+        """RViz风格的门口航点备用策略 - 在门口航点附近尝试多个位置"""
+        rospy.loginfo("尝试RViz风格门口航点备用策略...")
+        
+        # 获取原始门口航点位置
+        original_waypoint = self.waypoints[self.current_waypoint_index]
+        x, y, theta = original_waypoint
+        
+        # 生成备用门口航点列表（模拟RViz手动点击的位置）
+        alternative_doorway_waypoints = [
+            (x + 0.1, y, theta),      # 稍微向右
+            (x - 0.1, y, theta),      # 稍微向左  
+            (x, y + 0.1, theta),      # 稍微向前
+            (x, y - 0.1, theta),      # 稍微向后
+            (x + 0.05, y + 0.05, theta), # 稍微向右前
+            (x - 0.05, y + 0.05, theta), # 稍微向左前
+            (x + 0.05, y - 0.05, theta), # 稍微向右后
+            (x - 0.05, y - 0.05, theta), # 稍微向左后
+            (x + 0.15, y, theta),     # 更向右
+            (x - 0.15, y, theta),     # 更向左
+            (x, y + 0.15, theta),     # 更向前
+            (x, y - 0.15, theta),     # 更向后
+        ]
+        
+        # 尝试每个备用点
+        for i, (alt_x, alt_y, alt_theta) in enumerate(alternative_doorway_waypoints):
+            rospy.loginfo(f"尝试备用门口航点 {i+1}/{len(alternative_doorway_waypoints)}: ({alt_x}, {alt_y}, {alt_theta})")
+            
+            # 取消当前目标
+            cancel_msg = GoalID()
+            self.cancel_pub.publish(cancel_msg)
+            rospy.sleep(0.5)
+            
+            # 临时修改当前航点
+            self.waypoints[self.current_waypoint_index] = (alt_x, alt_y, alt_theta)
+            
+            # 发布备用目标
+            goal_msg = self._build_move_base_goal(alt_x, alt_y, alt_theta)
+            self.goal_pub.publish(goal_msg)
+            
+            # 等待一段时间看是否成功
+            rospy.sleep(3.0)
+            
+            # 检查是否开始移动
+            current_dx = self.current_position["x"] - self.last_position_check["x"]
+            current_dy = self.current_position["y"] - self.last_position_check["y"]
+            current_dist_moved = math.hypot(current_dx, current_dy)
+            
+            # 如果开始移动，认为成功
+            if current_dist_moved > 0.1:
+                rospy.loginfo(f"✅ 备用门口航点 {i+1} 成功，机器人开始移动 {current_dist_moved:.3f}米")
+                # 恢复原始航点位置
+                self.waypoints[self.current_waypoint_index] = original_waypoint
+                return
+            else:
+                rospy.logwarn(f"备用门口航点 {i+1} 未成功，继续尝试下一个...")
+        
+        # 如果所有备用点都失败，恢复原始位置并跳过
+        rospy.logwarn("所有备用门口航点都失败，跳过门口航点...")
+        self.waypoints[self.current_waypoint_index] = original_waypoint
+        self.force_move_to_next_waypoint()
 
     def navigate_to_current_waypoint(self, is_retry=False):
         """Navigate to the current waypoint with error handling"""
@@ -1048,11 +1246,16 @@ class SimpleNavWaypointPlayer:
                 dist_moved = math.hypot(dx, dy)
                 
                 if dist_moved < 0.1:  # 如果几乎没有移动
+                    # 检查是否是第一个航点
+                    if self.current_waypoint_index == 0:
+                        rospy.logwarn(f"[路径规划失败] 第一个航点{detection_threshold}秒内只移动了{dist_moved:.3f}米，尝试RViz风格备用策略...")
+                        # 对于第一个点，使用RViz风格的备用策略
+                        self._try_rviz_style_first_waypoint_approach()
                     # 检查是否是门口过渡点
-                    if self.is_current_doorway_waypoint():
-                        rospy.logwarn(f"[路径规划失败] 门口过渡点{detection_threshold}秒内只移动了{dist_moved:.3f}米，尝试备用策略...")
-                        # 尝试备用门口点位
-                        self._try_alternative_doorway_approach()
+                    elif self.is_current_doorway_waypoint():
+                        rospy.logwarn(f"[路径规划失败] 门口过渡点{detection_threshold}秒内只移动了{dist_moved:.3f}米，尝试RViz风格备用策略...")
+                        # 使用RViz风格的备用策略
+                        self._try_rviz_style_doorway_approach()
                     # 检查是否是最后一个航点（后台点）
                     elif self.current_waypoint_index == len(self.waypoints) - 1:
                         rospy.logwarn(f"[路径规划失败] 机器人{detection_threshold}秒内只移动了{dist_moved:.3f}米，但这是最后一个航点，尝试RViz风格备用策略...")
@@ -1062,129 +1265,6 @@ class SimpleNavWaypointPlayer:
                         rospy.logwarn(f"[路径规划失败] 机器人{detection_threshold}秒内只移动了{dist_moved:.3f}米，跳过当前点")
                         self.force_move_to_next_waypoint()
 
-    def _try_alternative_doorway_approach(self):
-        """尝试备用门口点位策略"""
-        try:
-            rospy.loginfo("尝试备用门口点位策略...")
-            
-            # 策略1: 尝试更宽松的规划参数
-            self._apply_ultra_loose_params()
-            rospy.sleep(1.0)
-            self.navigate_to_current_waypoint(is_retry=True)
-            
-            # 设置一个较短的检测时间，如果还是失败就尝试策略2
-            self.plan_failure_timer = rospy.Timer(
-                rospy.Duration(6.0), self._try_doorway_strategy_2, oneshot=True
-            )
-            self._timers.append(self.plan_failure_timer)
-            
-        except Exception as e:
-            rospy.logerr(f"备用门口策略1失败: {e}")
-            self._try_doorway_strategy_2(None)
-
-    def _apply_ultra_loose_params(self):
-        """应用超宽松的规划参数"""
-        try:
-            from dynamic_reconfigure.client import Client
-            client = Client("/move_base/TebLocalPlannerROS", timeout=3.0)
-            
-            ultra_loose_params = {
-                'xy_goal_tolerance': 0.5,      # 更大的目标容差
-                'yaw_goal_tolerance': 0.5,    # 更大的角度容差
-                'min_obstacle_dist': 0.02,     # 极小的障碍物距离
-                'inflation_dist': 0.05,         # 极小的膨胀距离
-                'weight_obstacle': 5,          # 极小的障碍物权重
-                'weight_inflation': 0.01,      # 极小的膨胀权重
-                'max_vel_x': 0.8,              # 很慢的速度
-                'max_vel_theta': 0.5,          # 很慢的角速度
-                'enable_homotopy_class_planning': True,
-                'max_number_classes': 8,       # 更多同伦类
-                'roadmap_graph_no_samples': 30, # 更多采样点
-                'roadmap_graph_area_width': 12, # 更大的规划区域
-            }
-            
-            rospy.loginfo("应用超宽松规划参数...")
-            client.update_configuration(ultra_loose_params)
-            
-        except Exception as e:
-            rospy.logwarn(f"应用超宽松参数失败: {e}")
-
-    def _try_doorway_strategy_2(self, event):
-        """门口点位策略2: 尝试不同的门口位置"""
-        try:
-            rospy.loginfo("尝试门口点位策略2: 使用备用门口位置...")
-            
-            # 定义备用门口位置（稍微偏移）
-            original_waypoint = self.waypoints[self.current_waypoint_index]
-            x, y, theta = original_waypoint
-            
-            # 尝试几个备用位置
-            alternative_positions = [
-                (x + 0.1, y, theta),      # 稍微向右
-                (x - 0.1, y, theta),      # 稍微向左
-                (x, y + 0.1, theta),      # 稍微向前
-                (x, y - 0.1, theta),      # 稍微向后
-                (x + 0.2, y, theta),      # 更向右
-            ]
-            
-            for i, (alt_x, alt_y, alt_theta) in enumerate(alternative_positions):
-                rospy.loginfo(f"尝试备用门口位置 {i+1}: ({alt_x}, {alt_y}, {alt_theta})")
-                
-                # 临时修改当前航点
-                self.waypoints[self.current_waypoint_index] = (alt_x, alt_y, alt_theta)
-                
-                # 恢复默认参数
-                self._restore_default_planner_params()
-                rospy.sleep(0.5)
-                
-                # 尝试导航到备用位置
-                self.navigate_to_current_waypoint(is_retry=True)
-                
-                # 设置检测时间
-                self.plan_failure_timer = rospy.Timer(
-                    rospy.Duration(4.0), self._check_alternative_success, oneshot=True
-                )
-                self._timers.append(self.plan_failure_timer)
-                return  # 只尝试第一个备用位置，如果失败会继续
-                
-        except Exception as e:
-            rospy.logerr(f"门口策略2失败: {e}")
-            self._try_doorway_strategy_3()
-
-    def _check_alternative_success(self, event):
-        """检查备用位置是否成功"""
-        current_state = self.get_state()
-        if current_state == NavigationState.NAVIGATING:
-            # 检查是否移动了
-            dx = self.current_position["x"] - self.last_position_check["x"]
-            dy = self.current_position["y"] - self.last_position_check["y"]
-            dist_moved = math.hypot(dx, dy)
-            
-            if dist_moved < 0.1:
-                rospy.logwarn("备用门口位置也失败，尝试策略3...")
-                self._try_doorway_strategy_3()
-            else:
-                rospy.loginfo("备用门口位置成功，继续导航...")
-
-    def _try_doorway_strategy_3(self):
-        """门口点位策略3: 直接跳过门口点，尝试下一个点"""
-        try:
-            rospy.logwarn("门口点位策略3: 直接跳过门口过渡点...")
-            
-            # 恢复原始门口位置
-            self.waypoints[self.current_waypoint_index] = (-1.91, 1.35, 0)
-            
-            # 恢复默认参数
-            self._restore_default_planner_params()
-            
-            # 直接跳过门口点
-            rospy.loginfo("跳过门口过渡点，直接前往下一个航点...")
-            self.force_move_to_next_waypoint()
-            
-        except Exception as e:
-            rospy.logerr(f"门口策略3失败: {e}")
-            # 最后的备用方案：强制跳过
-            self.force_move_to_next_waypoint()
 
     def perform_dance(self):
         """
@@ -1384,10 +1464,12 @@ if __name__ == "__main__":
        #祖国的好山河 - 全局时间310秒  4*60+55=295
        # Start + Up:
         "A": {
-            "global_time": 310.0,
+            "global_time": 310.0,   
             "waypoints": [
-                ((-1.5, 0, 180), 66.0),
-               
+                ((-1.91,1.35, 180), 67),
+                
+                
+                
                 ((-2.2, 3.0, 180), 30.0),
                 ((-2.6, 3.4, 180), 40.0),
                 ((-3.0, 3.4, -170), 20.0),   
@@ -1406,8 +1488,8 @@ if __name__ == "__main__":
         "B": {
             "global_time": 180.5,
             "waypoints": [
-                ((-2.3, 3.6, 180), 40.0),
-                ((-2.6, 3.6, -170), 40.0),
+                ((-2.3, 3.6, 180), 35.0),
+                ((-2.6, 3.6, -170), 35.0),
                 ((-2.8, 3.6, 180), 42.5),
                                 
                 ((-2.7, 3.2, 160), 38.0),
