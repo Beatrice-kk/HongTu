@@ -208,15 +208,9 @@ class RobustBackstageNavigator:
         return goal
     
     def _apply_planner_config(self, config):
-        """应用规划器配置"""
-        try:
-            client = Client("/move_base/TebLocalPlannerROS", timeout=5.0)
-            client.update_configuration(config)
-            rospy.loginfo(f"应用规划器配置: {config.get('name', 'unknown')}")
-            return True
-        except Exception as e:
-            rospy.logwarn(f"应用规划器配置失败: {e}")
-            return False
+        """应用规划器配置 - 已禁用，直接返回True"""
+        rospy.loginfo(f"跳过规划器配置: {config.get('name', 'unknown')} (已禁用)")
+        return True
     
     def _stop_robot(self):
         """停止机器人"""
@@ -236,12 +230,36 @@ class RobustBackstageNavigator:
         except Exception as e:
             rospy.logwarn(f"取消目标失败: {e}")
     
-    def _check_arrival(self, target_pos, tolerance=0.3):
-        """检查是否到达目标点"""
+    def _check_arrival(self, target_pos, tolerance=0.15):
+        """检查是否到达目标点 - 使用更严格的容差"""
         dx = self.current_position["x"] - target_pos[0]
         dy = self.current_position["y"] - target_pos[1]
         distance = math.sqrt(dx*dx + dy*dy)
+        rospy.loginfo(f"当前位置: ({self.current_position['x']:.3f}, {self.current_position['y']:.3f}), 目标: {target_pos}, 距离: {distance:.3f}m, 容差: {tolerance}m")
         return distance < tolerance
+    
+    def _check_arrival_g1_style(self, target_pos):
+        """使用与g1_control相同的到达判断标准"""
+        # 距离检查：0.4米容差（与g1_control一致）
+        dx = self.current_position["x"] - target_pos[0]
+        dy = self.current_position["y"] - target_pos[1]
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        # 角度检查：35度容差（与g1_control一致）
+        current_theta_rad = math.radians(self.current_position["theta"])
+        target_theta_rad = math.radians(target_pos[2])
+        angle_diff = abs(current_theta_rad - target_theta_rad)
+        # 处理角度跨越问题
+        if angle_diff > math.pi:
+            angle_diff = 2 * math.pi - angle_diff
+        
+        rospy.loginfo(f"G1风格到达检查 - 距离: {distance:.3f}m (阈值: 0.4m), 角度差: {math.degrees(angle_diff):.1f}° (阈值: 35°)")
+        
+        # 与g1_control相同的判断条件
+        distance_ok = distance <= 0.4
+        angle_ok = angle_diff <= math.radians(35)
+        
+        return distance_ok and angle_ok
     
     def _try_single_navigation(self, target_pos, config, timeout=15):
         """尝试单次导航 - 优先确保机器人能够移动"""
@@ -275,24 +293,28 @@ class RobustBackstageNavigator:
             current_y = self.current_position["y"]
             distance_moved = math.sqrt((current_x - start_x)**2 + (current_y - start_y)**2)
             
-            if distance_moved > 0.1:  # 移动了超过10cm就认为开始移动了
+            if distance_moved > 0.3:  # 移动了超过30cm才认为开始移动了
                 if not movement_detected:
                     rospy.loginfo(f"机器人开始移动，已移动 {distance_moved:.2f}米")
                     movement_detected = True
             
-            # 检查是否到达目标（使用更宽松的容差）
-            if self._check_arrival(target_pos, tolerance=1.0):  # 1米容差
-                rospy.loginfo(f"? 成功到达目标点: {target_pos}")
+            # 检查是否到达目标（使用严格的容差）
+            if self._check_arrival(target_pos, tolerance=0.15):  # 15cm容差
+                rospy.loginfo(f"✓ 成功到达目标点: {target_pos}")
                 return True
             
             rospy.sleep(0.5)
         
-        # 如果机器人开始移动了，即使没到达目标也认为部分成功
-        if movement_detected:
-            rospy.loginfo(f"? 机器人已开始移动，部分成功: {target_pos}")
+        # 检查最终位置
+        final_distance = math.sqrt((self.current_position["x"] - target_pos[0])**2 + (self.current_position["y"] - target_pos[1])**2)
+        rospy.loginfo(f"导航结束，最终距离目标: {final_distance:.3f}米")
+        
+        # 只有真正接近目标才认为成功
+        if final_distance < 0.2:  # 20cm内才认为成功
+            rospy.loginfo(f"✓ 成功到达目标点: {target_pos}")
             return True
         
-        rospy.logwarn(f"? 导航超时，机器人未移动: {target_pos}")
+        rospy.logwarn(f"✗ 导航失败，距离目标还有 {final_distance:.3f}米: {target_pos}")
         return False
     
     def _try_waypoint_sequence(self, target_pos, config):
@@ -330,63 +352,79 @@ class RobustBackstageNavigator:
         return False
     
     def _try_force_approach(self, target_pos):
-        """尝试强制接近目标点 - 优先确保机器人能够移动"""
+        """尝试强制接近目标点 - 使用更直接的控制方法"""
         rospy.loginfo(f"尝试强制接近: {target_pos}")
         
         # 停止机器人
         self._stop_robot()
+        rospy.sleep(1.0)  # 等待停止
         
         # 计算到目标点的方向
         dx = target_pos[0] - self.current_position["x"]
         dy = target_pos[1] - self.current_position["y"]
         distance = math.sqrt(dx*dx + dy*dy)
         
-        if distance < 2.0:  # 已经很接近了（放宽容差）
+        rospy.loginfo(f"当前距离目标: {distance:.3f}米")
+        
+        if distance < 0.2:  # 已经很接近了
+            rospy.loginfo(f"✓ 已经接近目标: {target_pos}")
             return True
         
         # 计算移动方向
         angle = math.atan2(dy, dx)
+        rospy.loginfo(f"目标方向角度: {math.degrees(angle):.1f}度")
         
-        # 发布移动命令 - 更积极的移动
+        # 分阶段移动：先转向，再前进
+        # 阶段1：转向目标方向
+        rospy.loginfo("阶段1：转向目标方向")
+        turn_msg = Twist()
+        turn_msg.angular.z = 0.5 if angle > 0 else -0.5
+        
+        start_time = rospy.Time.now()
+        while (rospy.Time.now() - start_time).to_sec() < 5.0:
+            self.cmd_vel_pub.publish(turn_msg)
+            rospy.sleep(0.1)
+        
+        self._stop_robot()
+        rospy.sleep(0.5)
+        
+        # 阶段2：前进
+        rospy.loginfo("阶段2：前进到目标")
         move_msg = Twist()
-        move_msg.linear.x = 0.5  # 增加移动速度
-        move_msg.angular.z = angle * 0.8  # 增加转向速度
+        move_msg.linear.x = 0.3  # 适中的速度
         
-        # 记录开始位置
         start_x = self.current_position["x"]
         start_y = self.current_position["y"]
-        movement_detected = False
-        
-        # 持续移动直到接近目标
         start_time = rospy.Time.now()
-        while (rospy.Time.now() - start_time).to_sec() < 20.0:  # 增加超时时间
+        
+        while (rospy.Time.now() - start_time).to_sec() < 15.0:
             self.cmd_vel_pub.publish(move_msg)
             
-            # 检查是否开始移动
+            # 检查当前位置
             current_x = self.current_position["x"]
             current_y = self.current_position["y"]
-            distance_moved = math.sqrt((current_x - start_x)**2 + (current_y - start_y)**2)
+            current_distance = math.sqrt((current_x - target_pos[0])**2 + (current_y - target_pos[1])**2)
             
-            if distance_moved > 0.2:  # 移动了超过20cm
-                if not movement_detected:
-                    rospy.loginfo(f"强制接近：机器人开始移动，已移动 {distance_moved:.2f}米")
-                    movement_detected = True
+            rospy.loginfo(f"当前距离目标: {current_distance:.3f}米")
             
-            if self._check_arrival(target_pos, tolerance=1.5):  # 放宽容差
+            if current_distance < 0.15:  # 15cm内认为成功
                 self._stop_robot()
-                rospy.loginfo(f"? 强制接近成功: {target_pos}")
+                rospy.loginfo(f"✓ 强制接近成功: {target_pos}")
                 return True
             
             rospy.sleep(0.1)
         
         self._stop_robot()
         
-        # 如果机器人开始移动了，即使没到达目标也认为部分成功
-        if movement_detected:
-            rospy.loginfo(f"? 强制接近部分成功，机器人已移动: {target_pos}")
+        # 检查最终结果
+        final_distance = math.sqrt((self.current_position["x"] - target_pos[0])**2 + (self.current_position["y"] - target_pos[1])**2)
+        rospy.loginfo(f"强制接近结束，最终距离: {final_distance:.3f}米")
+        
+        if final_distance < 0.3:  # 30cm内认为部分成功
+            rospy.loginfo(f"✓ 强制接近部分成功: {target_pos}")
             return True
         
-        rospy.logwarn(f"? 强制接近失败，机器人未移动: {target_pos}")
+        rospy.logwarn(f"✗ 强制接近失败: {target_pos}")
         return False
     
     def odom_callback(self, msg):
@@ -404,107 +442,88 @@ class RobustBackstageNavigator:
             rospy.logwarn(f"处理里程计数据失败: {e}")
     
     def arrival_callback(self, msg):
-        """处理到达状态回调"""
+        """处理到达状态回调 - 只有在1米内且停止时才退出程序"""
         if msg.data == "arrived":
             rospy.loginfo("收到机器人到达状态")
-            if self._check_arrival(self.target_pos):
-                rospy.loginfo("? 机器人已成功到达后台点！")
+            
+            # 检查当前位置信息
+            rospy.loginfo(f"当前位置: ({self.current_position['x']:.3f}, {self.current_position['y']:.3f})")
+            rospy.loginfo(f"目标位置: {self.target_pos}")
+            
+            # 计算实际距离
+            dx = self.current_position["x"] - self.target_pos[0]
+            dy = self.current_position["y"] - self.target_pos[1]
+            actual_distance = math.sqrt(dx*dx + dy*dy)
+            rospy.loginfo(f"实际距离目标: {actual_distance:.3f}米")
+            
+            # 只有在1米内且机器人停止时才退出程序
+            if actual_distance <= 1.0:
+                rospy.loginfo("✓ 机器人在1米范围内且已停止，程序即将退出")
                 self.navigation_success = True
+                
+                # 立即释放资源并结束程序
+                rospy.loginfo("释放资源...")
+                self._stop_robot()
+                self._cancel_current_goal()
+                
+                rospy.loginfo("导航任务完成，程序即将退出")
+                rospy.signal_shutdown("到达目标范围")
             else:
-                rospy.loginfo("机器人到达了某个点，但可能不是目标点")
+                rospy.loginfo(f"机器人距离目标还有 {actual_distance:.3f}米，继续等待...")
     
     def navigate_to_backstage(self):
-        """主要导航方法 - 优先确保机器人能够移动"""
-        rospy.loginfo("开始高成功率导航到后台点...")
+        """主要导航方法 - 发布目标后等待到达状态"""
+        rospy.loginfo("开始导航到后台点...")
         rospy.loginfo(f"目标点: {self.target_pos}")
-        rospy.loginfo("优先策略：确保机器人能够移动，不要求精准度")
+        rospy.loginfo("策略：发布目标，等待g1_control的到达状态")
         
-        # 策略1：优先尝试强制移动参数
-        rospy.loginfo("策略1：尝试强制移动参数...")
-        for config in self.planner_configs[:3]:  # 只尝试前3个强制移动配置
-            if self.navigation_success:
-                break
-                
-            rospy.loginfo(f"尝试规划器配置: {config['name']}")
-            
-            # 只尝试前几个目标点，快速测试
-            for i, target in enumerate(self.backup_targets[:8]):  # 只尝试前8个目标点
-                if self.navigation_success:
-                    break
-                    
-                self.attempt_count += 1
-                rospy.loginfo(f"尝试 {self.attempt_count}/{self.max_attempts}: 目标点 {i+1}/8")
-                
-                # 尝试直接导航
-                if self._try_single_navigation(target, config, timeout=10):  # 缩短超时时间
-                    self.navigation_success = True
-                    break
-                
-                # 短暂休息
-                rospy.sleep(0.5)
+        # 发布初始目标
+        goal_msg = self._build_move_base_goal(self.target_pos[0], self.target_pos[1], self.target_pos[2])
+        self.goal_pub.publish(goal_msg)
+        rospy.loginfo("已发布初始目标，等待g1_control处理...")
         
-        # 策略2：如果规划器导航失败，立即尝试强制接近
-        if not self.navigation_success:
-            rospy.logwarn("规划器导航失败，立即尝试强制接近...")
-            if self._try_force_approach(self.target_pos):
-                self.navigation_success = True
-        
-        # 策略3：如果强制接近也失败，尝试更激进的方法
-        if not self.navigation_success:
-            rospy.logwarn("尝试更激进的移动方法...")
-            
-            # 尝试多个方向的强制移动
-            directions = [
-                (0.3, 0, 0),    # 向前
-                (-0.3, 0, 0),   # 向后
-                (0, 0.3, 0),    # 向左
-                (0, -0.3, 0),   # 向右
-                (0.2, 0.2, 0),  # 斜向
-                (-0.2, 0.2, 0), # 斜向
-            ]
-            
-            for i, (dx, dy, dtheta) in enumerate(directions):
-                test_target = (self.target_pos[0] + dx, self.target_pos[1] + dy, self.target_pos[2] + dtheta)
-                rospy.loginfo(f"尝试方向 {i+1}: {test_target}")
-                
-                if self._try_force_approach(test_target):
-                    self.navigation_success = True
-                    break
-                
-                rospy.sleep(1.0)
-        
-        # 最终结果
-        if self.navigation_success:
-            rospy.loginfo("? 导航成功！机器人已开始移动或到达目标")
-        else:
-            rospy.logerr("? 所有移动策略都失败了")
-            rospy.logerr(f"尝试了 {self.attempt_count} 次导航")
-            rospy.logerr("建议检查机器人硬件和传感器状态")
-        
-        return self.navigation_success
+        # 等待到达状态，不主动干预
+        rospy.loginfo("等待机器人到达...")
+        return True  # 让主循环处理等待逻辑
     
     def run(self):
-        """运行导航器"""
+        """运行导航器 - 发布目标后等待到达状态"""
         try:
             # 等待系统稳定
             rospy.sleep(2.0)
             
             # 开始导航
-            success = self.navigate_to_backstage()
+            rospy.loginfo("开始导航任务...")
+            self.navigate_to_backstage()
             
-            if success:
-                rospy.loginfo("导航任务完成")
+            # 等待到达信号，程序会在这里阻塞直到收到到达状态
+            rospy.loginfo("程序等待到达信号...")
+            rospy.loginfo("只有在1米范围内且机器人停止时才会退出程序")
+            
+            # 保持程序运行，直到收到到达信号
+            while not rospy.is_shutdown() and not self.navigation_success:
+                # 额外检查：如果机器人已经在1米内，也考虑退出
+                dx = self.current_position["x"] - self.target_pos[0]
+                dy = self.current_position["y"] - self.target_pos[1]
+                current_distance = math.sqrt(dx*dx + dy*dy)
+                
+                if current_distance <= 0.45:
+                    rospy.loginfo(f"机器人已在0.45米范围内 ({current_distance:.3f}米)，等待停止信号...")
+                
+                rospy.sleep(0.5)  # 稍微慢一点，避免过于频繁的检查
+            
+            if self.navigation_success:
+                rospy.loginfo("✓ 程序已收到到达信号并退出")
             else:
-                rospy.logerr("导航任务失败")
+                rospy.logerr("✗ 程序异常退出")
                 
         except KeyboardInterrupt:
             rospy.loginfo("用户中断导航")
         except Exception as e:
             rospy.logerr(f"导航过程中发生错误: {e}")
         finally:
-            # 清理
-            self._stop_robot()
-            self._cancel_current_goal()
+            # 清理（在arrival_callback中已经处理了）
+            rospy.loginfo("程序清理完成")
 
 def main():
     """主函数"""

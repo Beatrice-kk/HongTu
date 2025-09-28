@@ -2320,7 +2320,7 @@ class G1ActionPlayer:
     def _can_trigger_after_reloc(self) -> bool:
         """
         检查重定位是否成功。
-        返回 True 表示重定位成功，可以触发 new_plan。
+        返回 True 表示重定位成功，可以触发 fuking2des。
         """
         # 使用重定位成功标志
         return self.relocalization_success
@@ -2412,30 +2412,30 @@ class G1ActionPlayer:
         else:
             return self._set_volume(100)  # 默认音量
 
-    def _check_and_kill_new_plan_processes(self):
+    def _check_and_kill_fuking2des_processes(self):
         """
-        检查并关闭所有 new_plan 相关进程
+        检查并关闭所有 fuking2des 相关进程
         不管参数是什么，先关闭再启动新的
         加入更彻底的服务释放逻辑，但减少等待时间避免阻塞
         """
         try:
-            print("🔍 检查是否有 new_plan 程序在运行...")
+            print("🔍 检查是否有 fuking2des 程序在运行...")
             
-            # 第一步：优雅关闭 new_plan 进程
-            result = subprocess.run(["pkill", "-f", "new_plan"], 
+            # 第一步：优雅关闭 fuking2des 进程
+            result = subprocess.run(["pkill", "-f", "fuking2des"], 
                                   capture_output=True, text=True, check=False)
             
             if result.returncode == 0:
-                print("🛑 发现并关闭了 new_plan 相关进程")
+                print("🛑 发现并关闭了 fuking2des 相关进程")
                 # 减少等待时间，避免阻塞主程序
                 time.sleep(0.3)
                 
                 # 第二步：检查是否还有残留进程，强制终止
-                check_result = subprocess.run(["pgrep", "-f", "new_plan"], 
+                check_result = subprocess.run(["pgrep", "-f", "fuking2des"], 
                                            capture_output=True, text=True, check=False)
                 if check_result.returncode == 0:
                     print("⚠️ 发现残留进程，强制终止...")
-                    subprocess.run(["pkill", "-9", "-f", "new_plan"], 
+                    subprocess.run(["pkill", "-9", "-f", "fuking2des"], 
                                  capture_output=True, text=True, check=False)
                     time.sleep(0.2)
                 
@@ -2471,10 +2471,10 @@ class G1ActionPlayer:
                     print(f"⚠️ 启动清理线程时出错: {cleanup_e}")
                 
             else:
-                print("✅ 没有发现运行中的 new_plan 进程")
+                print("✅ 没有发现运行中的 fuking2des 进程")
                 
         except Exception as e:
-            print(f"⚠️ 检查/关闭 new_plan 进程时出错: {e}")
+            print(f"⚠️ 检查/关闭 fuking2des 进程时出错: {e}")
 
     def _shutdown_navigation_systems(self):
         """关闭所有导航建图相关程序"""
@@ -2508,8 +2508,8 @@ class G1ActionPlayer:
                 subprocess.run(["pkill", "-f", "auto_relocalize"], check=False)
                 # 关闭rviz
                 subprocess.run(["pkill", "-f", "rviz"], check=False)
-                # 关闭new_plan相关进程
-                subprocess.run(["pkill", "-f", "new_plan"], check=False)
+                # 关闭fuking2des相关进程
+                subprocess.run(["pkill", "-f", "fuking2des"], check=False)
                 print("✅ 导航相关进程已关闭")
             except Exception as e:
                 print(f"⚠️ 关闭ROS进程时出错: {e}")
@@ -3116,9 +3116,9 @@ def main(return_remote=False):
                         except Exception as e:
                             print(f"❌ 播放提示音时出错: {e}")
                         
-                        # 关闭所有 new_plan 相关程序
-                        print("🛑 正在关闭 new_plan 相关程序...")
-                        player._check_and_kill_new_plan_processes()
+                        # 关闭所有 fuking2des 相关程序
+                        print("🛑 正在关闭 fuking2des 相关程序...")
+                        player._check_and_kill_fuking2des_processes()
                         
                         player.stop_play()
                     # 如果当前正在回到初始姿态过程中，也可以强制停止
@@ -3135,9 +3135,9 @@ def main(return_remote=False):
                         except Exception as e:
                             print(f"❌ 播放提示音时出错: {e}")
                         
-                        # 关闭所有 new_plan 相关程序
-                        print("🛑 正在关闭 new_plan 相关程序...")
-                        player._check_and_kill_new_plan_processes()
+                        # 关闭所有 fuking2des 相关程序
+                        print("🛑 正在关闭 fuking2des 相关程序...")
+                        player._check_and_kill_fuking2des_processes()
                         
                         # 直接设置为停止状态并停止音频
                         player.state = "stopped"
@@ -3199,19 +3199,19 @@ def main(return_remote=False):
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
 
-                # Start + Up: 导航启动≥10秒后触发 new_plan.py -a
+                # Start + Up: 导航启动≥10秒后触发 fuking2des.py -a
                 elif remote.get_combo_once('Start', 'Up'):
                     if player.function_activated:  # 只有功能激活后才能使用
                         if player._can_trigger_after_reloc():
-                            print("🎭 检测到 Start + Up，触发 new_plan.py")
+                            print("🎭 检测到 Start + Up，触发 fuking2des.py")
                             try:
-                                # 先检查并关闭 new_plan 程序
-                                player._check_and_kill_new_plan_processes()
+                                # 先检查并关闭 fuking2des 程序
+                                player._check_and_kill_fuking2des_processes()
                                 
                                 # 在独立后台进程中运行，避免阻塞
                                 subprocess.Popen([
                                     "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'A'"
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/fuking2des.py --dance 'A'"
                                 ])
                                 if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                     player.audio_processor.audio_client.TtsMaker("开始表演 祖国的好山河 ", 0)
@@ -3222,19 +3222,19 @@ def main(return_remote=False):
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
 
-                # Start + Down: 导航启动≥10秒后触发 new_plan.py --dance "B"
+                # Start + Down: 导航启动≥10秒后触发 fuking2des.py --dance "B"
                 elif remote.get_combo_once('Start', 'Down'):
                     if player.function_activated:  # 只有功能激活后才能使用
                         if player._can_trigger_after_reloc():
-                            print("🎭 检测到 Start + Down，触发 new_plan.py --dance.py")
+                            print("🎭 检测到 Start + Down，触发 fuking2des.py --dance.py")
                             try:
-                                # 先检查并关闭 new_plan 程序
-                                player._check_and_kill_new_plan_processes()
+                                # 先检查并关闭 fuking2des 程序
+                                player._check_and_kill_fuking2des_processes()
                                 
                                 # 在独立后台进程中运行，避免阻塞
                                 subprocess.Popen([
                                     "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'B'"
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/fuking2des.py --dance 'B'"
                                 ])
                                 if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                     player.audio_processor.audio_client.TtsMaker("开始表演 沙家浜总有一天会解放", 0)
@@ -3245,19 +3245,19 @@ def main(return_remote=False):
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
                         
-                # Start + Right: 导航启动≥10秒后触发 new_plan.py
+                # Start + Right: 导航启动≥10秒后触发 fuking2des.py
                 elif remote.get_combo_once('Start', 'Right'):
                     if player.function_activated:  # 只有功能激活后才能使用
                         if player._can_trigger_after_reloc():
-                            print("🎭 检测到 Start + Right，触发 new_plan.py")
+                            print("🎭 检测到 Start + Right，触发 fuking2des.py")
                             try:
-                                # 先检查并关闭 new_plan 程序
-                                player._check_and_kill_new_plan_processes()
+                                # 先检查并关闭 fuking2des 程序
+                                player._check_and_kill_fuking2des_processes()
                                 
                                 # 在独立后台进程中运行，避免阻塞
                                 subprocess.Popen([
                                     "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'X'"
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/fuking2des.py --dance 'X'"
                                 ])
                                 if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                     player.audio_processor.audio_client.TtsMaker("开始表演军军民鱼水情", 0)
@@ -3268,19 +3268,19 @@ def main(return_remote=False):
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
                         
-                # Start + Left: 导航启动≥10秒后触发 new_plan.py
+                # Start + Left: 导航启动≥10秒后触发 fuking2des.py
                 elif remote.get_combo_once('Start', 'Left'):
                     if player.function_activated:  # 只有功能激活后才能使用
                         if player._can_trigger_after_reloc():
-                            print("🎭 检测到 Start + Left，触发 new_plan.py")
+                            print("🎭 检测到 Start + Left，触发 fuking2des.py")
                             try:
-                                # 先检查并关闭 new_plan 程序
-                                player._check_and_kill_new_plan_processes()
+                                # 先检查并关闭 fuking2des 程序
+                                player._check_and_kill_fuking2des_processes()
                                 
                                 # 在独立后台进程中运行，避免阻塞
                                 subprocess.Popen([
                                     "bash", "-lc",
-                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Y'"
+                                    "python3 /home/unitree/HongTu/PythonProject/point_nav/fuking2des.py --dance 'Y'"
                                 ])
                                 if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                     player.audio_processor.audio_client.TtsMaker("开始表演 智斗", 0)
@@ -3294,13 +3294,13 @@ def main(return_remote=False):
                 elif remote.get_combo_once('Start', 'R1'):
                     if player._can_trigger_after_reloc():
                         try:
-                            # 先检查并关闭 new_plan 程序
-                            player._check_and_kill_new_plan_processes()
+                            # 先检查并关闭 fuking2des 程序
+                            player._check_and_kill_fuking2des_processes()
                             
                             # 在独立后台进程中运行，避免阻塞
                             subprocess.Popen([
                                 "bash", "-lc",
-                                "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Up'"
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/fuking2des.py --dance 'Up'"
                             ])
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                 player.audio_processor.audio_client.TtsMaker("准备开场白", 0)
@@ -3312,13 +3312,13 @@ def main(return_remote=False):
                 elif remote.get_combo_once('Start', 'R2'):
                     if player._can_trigger_after_reloc():
                         try:
-                            # 先检查并关闭 new_plan 程序
-                            player._check_and_kill_new_plan_processes()
+                            # 先检查并关闭 fuking2des 程序
+                            player._check_and_kill_fuking2des_processes()
                             
                             # 在独立后台进程中运行，避免阻塞
                             subprocess.Popen([
                                 "bash", "-lc",
-                                "python3 /home/unitree/HongTu/PythonProject/point_nav/new_plan.py --dance 'Down'"
+                                "python3 /home/unitree/HongTu/PythonProject/point_nav/fuking2des.py --dance 'Down'"
                             ])
                             if hasattr(player, 'audio_processor') and hasattr(player.audio_processor, 'audio_client'):
                                 player.audio_processor.audio_client.TtsMaker("准备闭幕词", 0)
@@ -3499,12 +3499,12 @@ def main(return_remote=False):
     print("  │  F1 + L2     │  开启/关闭语音控制        │")
     print("  │  Start + L1  │  启动 fastlio 导航        │")
     print("  │  Start + L2  │  关闭导航相关程序         │")
-    print("  │  Start + Up  │  触发 new_plan │")
-    print("  │  Start + Down│  触发 new_plan │")
-    print("  │  Start + Right│  触发 new_plan│")
-    print("  │  Start + Left│  触发 new_plan │")
-    print("  │  Start + R1  │  触发 new_plan │")
-    print("  │  Start + R2  │  触发 new_plan │")
+    print("  │  Start + Up  │  触发 fuking2des │")
+    print("  │  Start + Down│  触发 fuking2des │")
+    print("  │  Start + Right│  触发 fuking2des│")
+    print("  │  Start + Left│  触发 fuking2des │")
+    print("  │  Start + R1  │  触发 fuking2des │")
+    print("  │  Start + R2  │  触发 fuking2des │")
     print("  └──────────────┴────────────────────────────┘")
     print("🗣️  语音指令:")
     print("  ┌──────────────┬────────────────────────────┐")
