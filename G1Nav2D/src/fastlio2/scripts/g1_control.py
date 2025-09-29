@@ -27,8 +27,8 @@ class CmdVelController:
         self.has_target = False   # 是否有目标位置
         
         # 到达检测阈值
-        self.distance_threshold = 0.4  # 距离阈值 0.4米
-        self.angle_threshold = math.radians(35)  # 角度阈值 35度
+        self.distance_threshold = 0.45  # 距离阈值 0.45米
+        self.angle_threshold = math.radians(25)  # 角度阈值 25度
 
         # 订阅 /cmd_vel
         rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback)
