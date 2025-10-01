@@ -39,7 +39,7 @@
 
     </include>
 
-    <include file="$(find xju_pnc)/launch/move_base.launch" />
+    <include file="$(find cwk_plan_ctrl)/launch/move_base.launch" />
 
     <include file="$(find pointcloud_to_laserscan)/launch/point_to_scan.launch" />
 

@@ -27,8 +27,8 @@ class CmdVelController:
         self.has_target = False   # 是否有目标位置
         
         # 到达检测阈值
-        self.distance_threshold = 0.45  # 距离阈值 0.45米
-        self.angle_threshold = math.radians(25)  # 角度阈值 25度
+        self.distance_threshold = 0.46  # 距离阈值 0.45米
+        self.angle_threshold = math.radians(26)  # 角度阈值 25度
 
         # 订阅 /cmd_vel
         rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback)
@@ -146,11 +146,7 @@ class CmdVelController:
 
 
 if __name__ == "__main__":
-   #  if len(sys.argv) < 2:
-   #      print(f"Usage: rosrun your_package cmd_vel_control.py networkInterface")
-   #      sys.exit(-1)
 
-   #  network_interface = sys.argv[1]
 
       #   看具体网卡的名称 
     network_interface = "eth0"  

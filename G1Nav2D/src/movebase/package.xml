@@ -1,8 +1,8 @@
 <package format="2">
-    <name>xju_pnc</name>
+    <name>cwk_plan_ctrl</name>
     <version>0.0.1</version>
     <description>
-        <p>planning and control package for xju robot</p>
+        <p>planning and control package for cwk robot</p>
     </description>
     <author>TODO</author>
     <maintainer email="tongronglei@163.com" />

@@ -1,6 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+'''
+                  _ooOoo_
+                 o8888888o
+                 88" . "88
+                 (| -_- |)
+                 O\ = /O
+              ____/`---'\____
+            .' \\| |// `
+           / \\||| : |||// \
+          / _||||| -:- |||||- \
+          | | \\\ - /// | |
+          | \_| ''\---/'' | |
+          \ .-\__ `-` ___/-. /
+        ___`. .' /--.--\ `. . __
+     ."" '< `.___\_<|>_/___.' >'""
+    | | : `- \`.;`\ _ /`;.`/ - ` : | |
+    \ \ `-. \_ __\ /__ _/ .-` / /
+======`-.____`-.___\_____/___.-`____.-'======
+                  `=---='
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           佛祖保佑 永无BUG
+'''
 import rospy
 import math
 import threading
@@ -52,9 +73,18 @@ class SimpleNavWaypointPlayer:
         self.global_time_limit = dance_config["global_time"]
         self.dance_sequence = dance_config["waypoints"]
 
-        # Extract dance positions and wait times
+        # Extract dance positions and absolute times
         dance_waypoints = [pos for pos, _ in self.dance_sequence]
-        self.wait_times = [wait for _, wait in self.dance_sequence]
+        self.waypoint_times = [time for _, time in self.dance_sequence]
+        
+        # 计算等待时间（用于兼容性）
+        self.wait_times = []
+        for i in range(len(self.waypoint_times)):
+            if i < len(self.waypoint_times) - 1:
+                wait_time = self.waypoint_times[i + 1] - self.waypoint_times[i]
+            else:
+                wait_time = 0  # 最后一个点没有等待时间
+            self.wait_times.append(wait_time)
 
         # Build complete waypoint sequence
         # 确保后台点被包含在路径中
@@ -499,14 +529,15 @@ class SimpleNavWaypointPlayer:
         """定期记录状态信息"""
         status = self.get_status_info()
         
-        # 添加固定时间调度信息
+        # 添加绝对时间调度信息
         schedule_info = ""
         if self.waypoint_schedule and self.global_start_time:
             elapsed_time = (rospy.Time.now() - self.global_start_time).to_sec()
             if self.current_waypoint_index < len(self.waypoint_schedule):
                 current_schedule = self.waypoint_schedule[self.current_waypoint_index]
+                absolute_time = current_schedule['absolute_time']
                 remaining_time = current_schedule['end_time'] - elapsed_time
-                schedule_info = f" 调度时间:{elapsed_time:.1f}s 剩余:{remaining_time:.1f}s"
+                schedule_info = f" 绝对时间:{absolute_time:.1f}s 已用:{elapsed_time:.1f}s 剩余:{remaining_time:.1f}s"
         
         # 添加更详细的航点信息
         if self.current_waypoint_index < len(self.waypoints):
@@ -807,35 +838,39 @@ class SimpleNavWaypointPlayer:
             rospy.logwarn(f"恢复默认参数失败: {e}")
 
     def create_waypoint_schedule(self):
-        """创建基于全局时间的固定航点调度"""
-        if not self.waypoints or not self.wait_times:
-            rospy.logwarn("没有航点或等待时间数据，无法创建调度")
+        """创建基于全局时间的固定航点调度 - 使用绝对时间点"""
+        if not self.waypoints or not self.waypoint_times:
+            rospy.logwarn("没有航点或时间数据，无法创建调度")
             return
             
-        # 计算每个航点的计划时间
-        current_time = 0.0
+        # 使用绝对时间点创建调度
         self.waypoint_schedule = []
         
         for i in range(len(self.waypoints)):
             waypoint = self.waypoints[i]
-            wait_time = self.wait_times[i] if i < len(self.wait_times) else 0
+            absolute_time = self.waypoint_times[i] if i < len(self.waypoint_times) else 0
+            
+            # 计算等待时间（下一个点的时间 - 当前点的时间）
+            if i < len(self.waypoints) - 1:
+                next_time = self.waypoint_times[i + 1] if i + 1 < len(self.waypoint_times) else absolute_time
+                wait_time = next_time - absolute_time
+            else:
+                wait_time = 0  # 最后一个点没有等待时间
             
             # 记录这个航点的计划时间
             schedule_entry = {
                 'waypoint_index': i,
-                'start_time': current_time,
-                'end_time': current_time + wait_time,
+                'start_time': absolute_time,
+                'end_time': absolute_time + wait_time,
                 'wait_time': wait_time,
-                'waypoint': waypoint
+                'waypoint': waypoint,
+                'absolute_time': absolute_time
             }
             self.waypoint_schedule.append(schedule_entry)
             
-            rospy.loginfo(f"航点 {i+1}: {self.get_waypoint_description(i)} 计划时间 {current_time:.1f}s - {current_time + wait_time:.1f}s (等待{wait_time}s)")
-            
-            # 下一个航点的开始时间
-            current_time += wait_time
+            rospy.loginfo(f"航点 {i+1}: {self.get_waypoint_description(i)} 绝对时间 {absolute_time:.1f}s (等待{wait_time:.1f}s)")
         
-        rospy.loginfo(f"固定时间调度创建完成，总计划时间: {current_time:.1f}秒")
+        rospy.loginfo(f"绝对时间调度创建完成，总计划时间: {self.waypoint_times[-1] if self.waypoint_times else 0:.1f}秒")
         rospy.loginfo("调度定时器将在到达第一个点时启动")
     
     def start_schedule_timer(self):
@@ -850,20 +885,28 @@ class SimpleNavWaypointPlayer:
         self._timers.append(self.schedule_timer)
     
     def check_schedule(self, event):
-        """检查是否到了换点时间"""
+        """检查是否到了换点时间 - 基于绝对时间点"""
         if not self.waypoint_schedule or not self.global_start_time:
             return
             
         elapsed_time = (rospy.Time.now() - self.global_start_time).to_sec()
         
-        # 检查当前航点是否应该结束
+        # 检查是否到了下一个航点的时间
         if self.current_waypoint_index < len(self.waypoint_schedule):
             current_schedule = self.waypoint_schedule[self.current_waypoint_index]
+            next_waypoint_index = self.current_waypoint_index + 1
             
-            # 如果超过了当前航点的计划结束时间，强制换点
-            if elapsed_time >= current_schedule['end_time']:
-                rospy.logwarn(f"[固定时间调度] 航点 {self.current_waypoint_index+1} 计划时间已到 ({elapsed_time:.1f}s >= {current_schedule['end_time']:.1f}s)，强制换点")
-                self.force_transition_to_next_waypoint()
+            # 检查是否到了下一个航点的绝对时间
+            if next_waypoint_index < len(self.waypoint_schedule):
+                next_schedule = self.waypoint_schedule[next_waypoint_index]
+                if elapsed_time >= next_schedule['absolute_time']:
+                    rospy.logwarn(f"[绝对时间调度] 到达航点 {next_waypoint_index+1} 的绝对时间 ({elapsed_time:.1f}s >= {next_schedule['absolute_time']:.1f}s)，强制换点")
+                    self.force_transition_to_next_waypoint()
+            else:
+                # 检查当前航点是否应该结束（基于等待时间）
+                if elapsed_time >= current_schedule['end_time']:
+                    rospy.logwarn(f"[绝对时间调度] 航点 {self.current_waypoint_index+1} 等待时间已到 ({elapsed_time:.1f}s >= {current_schedule['end_time']:.1f}s)，强制换点")
+                    self.force_transition_to_next_waypoint()
     
     def force_transition_to_next_waypoint(self):
         """强制转换到下一个航点，不管当前导航状态"""
@@ -1215,11 +1258,13 @@ class SimpleNavWaypointPlayer:
             # Determine location description using the helper method
             location_desc = self.get_waypoint_description(self.current_waypoint_index)
 
-            wait_time = (
-                self.wait_times[self.current_waypoint_index]
-                if self.current_waypoint_index < len(self.wait_times)
-                else 0
-            )
+            # 计算等待时间（下一个点的绝对时间 - 当前点的绝对时间）
+            if self.current_waypoint_index < len(self.waypoint_times) - 1:
+                current_time = self.waypoint_times[self.current_waypoint_index]
+                next_time = self.waypoint_times[self.current_waypoint_index + 1]
+                wait_time = next_time - current_time
+            else:
+                wait_time = 0  # 最后一个点没有等待时间
             prefix = "[重试] " if is_retry else ""
             rospy.loginfo(
                 f"{prefix}[导航目标 {self.current_waypoint_index+1}/{len(self.waypoints)}] {location_desc} x={x}, y={y}, θ={theta} (等待时间: {wait_time}秒)"
@@ -1494,21 +1539,18 @@ if __name__ == "__main__":
         "A": {
             "global_time": 235.0,   
             "waypoints": [
-                ((-1.91,1.35, 180), 67),
-                
-                
-                
-                ((-2.2, 3.0, 180), 30.0),
-                ((-2.6, 3.4, 180), 40.0),
-                ((-3.0, 3.4, -170), 20.0),   
-                ((-2.2, 3.0, 180), 30.0),
-                ((-2.6, 3.4, 180), 40.0),
-                ((-3.0, 3.4, -170), 20.0),
-                ((-2.2, 3.0, 180), 30.0),
-                ((-2.6, 3.4, 180), 40.0),
-                ((-3.0, 3.4, -170), 20.0),
-                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.8, 0, 0), 0),
+                ((-1.91,1.35, 180), 0),      # 第0秒到达
+                ((-2.2, 3.0, 180), 30.0),     # 第30秒到达
+                ((-2.6, 3.4, 180), 70.0),     # 第70秒到达
+                ((-3.0, 3.4, 170), 90.0),    # 第90秒到达
+                ((-3.1, 3.0, -170), 120.0),    # 第120秒到达
+                ((-2.6, 3.0, 180), 160.0),    # 第160秒到达
+                ((-3.0, 3.4, -170), 180.0),   # 第180秒到达
+                ((-2.2, 3.0, 180), 210.0),    # 第210秒到达
+                ((-2.6, 3.4, 180), 250.0),    # 第250秒到达
+                ((-3.0, 3.4, -170), 270.0),   # 第270秒到达
+                ((-1.91,1.35, 0), 290.0),    # 第290秒到达门口点位
+                ((-0.8, 0, 0), 300.0),       # 第300秒到达后台
             ]
         },
         #沙家浜总有一天 - 
@@ -1516,127 +1558,97 @@ if __name__ == "__main__":
         "B": {
             "global_time": 180.5,
             "waypoints": [
-                ((-2.3, 3.6, 180), 35.0),
-                ((-2.6, 3.6, -170), 35.0),
-                ((-2.8, 3.6, 180), 42.5),
-                                
-                ((-2.7, 3.2, 160), 38.0),
-                ((-2.7, 2.9, 180), 38.0),
+               
+               # 舞台右侧起
+                ((-2.5, 3.7, -170), 0),        # 第0秒到达
+                ((-3.0, 3.6, -170), 35.0),    # 第35秒到达
+                ((-2.7, 3.6, 180), 50.0),     # 第70秒到达
                 
-                ((-2.8, 3.6, 180), 42.5),
-                                
-                ((-2.7, 3.1, 160), 38.0),
-                ((-2.7, 2.9, 180), 38.0),
-                
-                ((-2.3, 3.6, 180), 40.0),
-                ((-2.6, 3.6, -170), 40.0),
-                ((-2.8, 3.6, 180), 42.5),
-                                
-                ((-2.7, 2.9, 160), 38.0),
-                ((-2.7, 2.7, 180), 38.0),
+                ((-2.5, 3.6, 180), 70.0),     # 第70秒到达
+                ((-3.0, 2.5, 160), 112.5),    # 第112.5秒到达
+                ((-2.7, 2.5, 180), 150.5),    # 第150.5秒到达
                 
                 
-                ((-2.3, 3.4, 180), 40.0),
-                ((-2.6, 3.4, -170), 40.0),
-                ((-2.8, 3.4, 180), 42.5),
-                                
-                ((-2.7, 2.9, 160), 38.0),
-                ((-2.7, 2.7, 180), 38.0),
-                
-                ((-2.8, 3.4, 180), 42.5),
-                                
-                ((-2.7, 2.7, 180), 38.0),
-                ((-2.7, 2.8, 160), 33.5),
-                
-                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.8, 0, 0), 0),
+                ((-2.8, 3.6, 180), 193.0),    # 第193秒到达
+                ((-2.7, 3.1, 160), 235.5),    # 第235.5秒到达
+                ((-2.7, 2.9, 180), 273.5),    # 第273.5秒到达
+                ((-2.3, 3.6, 180), 311.5),    # 第311.5秒到达
+     
+     
+                ((-1.91,1.35, 0), 827.5),     # 第827.5秒到达门口点位
+                ((-0.8, 0, 0), 837.5),        # 第837.5秒到达后台
             ]
         },
          #军民鱼水情 - 全局时间272秒  3*60+52=272
          # Start + Right:
         "X": {
-            "global_time": 242.0,
+            "global_time": 244.0,
             "waypoints": [
-                ((-2.8, 2.6, 150), 25.0),     
-                ((-2.5, 2.6, 140), 55.0),     
+               # 舞台左侧起
+                ((-2.8, 2.3, 160), 0),        # 第0秒到达
+                ((-2.4, 2.3, 150), 35.0),      # 第25秒到达
+                ((-2.4, 2.5, 150), 70.0),      # 第80秒到达
+                #换位
+                ((-2.9, 3.2, 160), 80.0),   # 第90秒到达
+                #转身
+                ((-2.9, 3.8, -170), 100.0),   # 第100秒到达
                 
-                ((-2.5, 3.0, 180), 20.0),
+                ((-3.0, 3.6, -175), 198.0),    # 第198秒到达
                 
-               #  ((-2.6, 3.0, 180), 60.0),     
-                     
-                ((-2.75, 3.8, -160), 98.0),    
                 
-                ((-3.0, 3.4, -175), 75.0),     
                 
-                ((-2.8, 3.2, 180), 75.0),   
-                
-                ((-3.0, 3.2, -160), 55.0),     
-                  
-                
-                ((-1.91,1.35, 0), 0),          # 门口点位，中间过渡点
-                ((-0.8, 0, 0), 0),
+                ((-2.8, 3.2, 180), 273.0),     # 第273秒到达
+                ((-3.0, 3.2, -160), 348.0),    # 第348秒到达
+                ((-1.91,1.35, 0), 403.0),     # 第403秒到达门口点位
+                ((-0.8, 0, 0), 413.0),        # 第413秒到达后台
             ]
         },
         #智斗 - 全局时间520秒 (15个点位 × 30秒)
         # Start + Left:
         "Y": {
-            "global_time": 475.0,
+           #右侧
+            "global_time": 472.0,
             "waypoints": [
-                ((-2.8, 2.6, 150), 15.0),     
-                ((-2.5, 2.6, 140), 55.0),     
-                ((-2.5, 3.0, 180), 20.0),
-               #  ((-2.6, 3.0, 180), 60.0),   
-               #  90s   换位  
-                ((-2.75, 3.8, -170), 60.0),  
+                ((-2.8, 2.3, 180), 0),        # 第0秒到达
+                ((-2.5, 2.3, 170), 15.0),     # 第15秒到达
+                ((-2.5, 3.0, 165), 40.0),     # 第40秒到达
+                ((-2.75, 3.8, -170), 90.0),   # 第90秒到达
+                ((-2.0, 3.0, 0), 150.0),     # 第150秒到达   面壁  
+                ((-3.0, 3.5, 180), 190.0),    # 第190秒到达
                 
-                #150s     背对 观众
-                ((-2.0, 3.0, 0), 65.0), 
+                ((-1.8, 2.0, 150), 230.0),    # 第230秒到达
+                ((-2.8, 1.8, 120), 290.0),    # 第290秒到达
+                ((-3.2, 2.0, 160), 345.0),    # 第345秒到达
+                ((-2.3, 2.4, 175), 375.0),    # 第375秒到达
+                ((-2.9, 2.4, -175), 405.0),   # 第405秒到达
+                ((-3.3, 2.1, 180), 435.0),    # 第435秒到达
+                ((-3.3, 2.1, 165), 500.0),    # 第500秒到达
+
+                ((-3.0, 2.5, 160), 465.0),    # 第465秒到达
+                ((-2.4, 2.5, 185), 495.0),    # 第495秒到达
                 
-                    #3*60+40=220s  右边桌子   215    5*60+15=315
-                ((-3.0, 3.5, 180), 40.0),  
-                #4*60+20=260s  靠墙壁    255
-                ((-1.8, 2.0, 150), 60.0), 
-                #  5*60+15=315
-                ((-2.8, 1.8, 120), 75.0), 
-                
-                #7*60=420s  
-                ((-3.2, 2.0, 160), 55.0),     
-                ((-2.3, 2.9, 175), 30.0),
-                ((-2.9, 2.6, -175), 30.0),
-                ((-2.1, 2.8, 165), 30.0),
-                ((-2.6, 2.9, -165), 30.0),
-                ((-2.4, 2.5, 185), 30.0),
-                ((-2.2, 3.0, -170), 30.0),
-                ((-2.2, 3.0, -170), 30.0),
-                ((-2.2, 3.0, -170), 30.0),
-                ((-3.0, 2.6, 170), 30.0),
-                ((-2.5, 2.8, 160), 30.0),
-                ((-2.7, 2.7, -160), 30.0),
-                ((-3.0, 2.6, 170), 30.0),
-                ((-2.5, 2.8, 160), 30.0),
-                ((-3.0, 2.6, 170), 30.0),
-                ((-2.8, 2.8, -185), 30.0),
-                ((-1.91, 1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.8, 0, 0), 0),
+
+                ((-1.91, 1.35, 0), 825.0),   # 第825秒到达门口点位
+                ((-0.8, 0, 0), 835.0),       # 第835秒到达后台
             ]
         },
         # 上台 - 全局时间50秒
         "Up": {
             "global_time": 35.0,
             "waypoints": [
-                ((-2.6, 3.4, 180), 35.0),
-                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.8, 0, 0), 0),
+                ((-2.6, 3.4, 180), 0),        # 第0秒到达
+                ((-1.91,1.35, 0), 35.0),     # 第35秒到达门口点位
+                ((-0.8, 0, 0), 45.0),        # 第45秒到达后台
             ]
         },
         
         #下台 - 全局时间50秒
          "Down": {
-            "global_time": 35.0,
+            "global_time": 38.0,
             "waypoints": [
-                ((-2.6, 3.4, 170), 30.0),
-                ((-1.91,1.35, 0), 0),    # 门口点位，中间过渡点
-                ((-0.8, 0, 0), 0),
+                ((-2.6, 3.4, 170), 0),       # 第0秒到达
+                ((-1.91,1.35, 0), 30.0),     # 第30秒到达门口点位
+                ((-0.8, 0, 0), 40.0),       # 第40秒到达后台
             ]
         },
     }

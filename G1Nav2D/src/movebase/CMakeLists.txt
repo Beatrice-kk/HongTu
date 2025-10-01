@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(xju_pnc)
+project(cwk_plan_ctrl)
 
 add_compile_options(-std=c++17)
 
@@ -23,7 +23,7 @@ find_package(catkin REQUIRED COMPONENTS
 add_service_files(
         DIRECTORY srv
         FILES
-        xju_task.srv
+        cwk_task.srv
 )
 
 generate_messages()

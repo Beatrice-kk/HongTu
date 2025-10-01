@@ -107,12 +107,10 @@ def main():
             rospy.logwarn("Shutdown requested, stopping relocation attempts.")
             break
 
-        # 发送重定位请求
         if not attempt_relocalization(map_path, initial_pose['x'], initial_pose['y'], math.radians(yaw_deg)):
             rospy.logwarn("Failed to send relocalization command for yaw %.1f. Skipping.", yaw_deg)
             continue
         
-        # 等待更长时间让定位节点处理
         rospy.sleep(3.0) 
 
         # 检查结果

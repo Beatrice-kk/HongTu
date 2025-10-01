@@ -2403,7 +2403,7 @@ class G1ActionPlayer:
     def _set_volume_to_minimum(self):
         """将音量设置为最小"""
         #暂时  最后改成0
-        return self._set_volume(90)
+        return self._set_volume(40)
     
     def _restore_original_volume(self):
         """恢复原始音量"""
@@ -2411,25 +2411,6 @@ class G1ActionPlayer:
             return self._set_volume(self.original_volume)
         else:
             return self._set_volume(100)  # 默认音量
-
-    def _safe_ros_command(self, command, description, timeout=5):
-        """
-        安全执行ROS命令，包含完整的错误处理
-        """
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout)
-            if result.returncode == 0:
-                print(f"✅ {description}成功")
-                return True
-            else:
-                print(f"⚠️ {description}失败: {result.stderr}")
-                return False
-        except subprocess.TimeoutExpired:
-            print(f"⚠️ {description}超时({timeout}秒)，但继续执行其他清理")
-            return False
-        except Exception as e:
-            print(f"⚠️ {description}时出错: {e}")
-            return False
 
     def _check_and_kill_fuking2des_processes(self):
         """
@@ -2465,48 +2446,20 @@ class G1ActionPlayer:
                     import threading
                     def cleanup_ros_resources():
                         try:
-                            # 首先检查ROS系统是否可用
-                            def check_ros_system():
-                                try:
-                                    result = subprocess.run(["rostopic", "list"], 
-                                                          capture_output=True, text=True, check=False, timeout=3)
-                                    return result.returncode == 0
-                                except:
-                                    return False
-                            
-                            if not check_ros_system():
-                                print("⚠️ ROS系统不可用，跳过ROS服务清理")
-                                return
-                            
-                            print("🧹 开始清理ROS服务资源...")
-                            
-                            # 使用安全命令方法执行清理
-                            success_count = 0
-                            total_commands = 3
-                            
                             # 取消所有导航目标
-                            if self._safe_ros_command(
-                                ["rostopic", "pub", "/move_base/cancel", "actionlib_msgs/GoalID", "{}"],
-                                "取消导航目标", timeout=5
-                            ):
-                                success_count += 1
+                            subprocess.run(["rostopic", "pub", "/move_base/cancel", "actionlib_msgs/GoalID", "{}"], 
+                                         capture_output=True, text=True, check=False, timeout=2)
                             
                             # 停止机器人运动
-                            if self._safe_ros_command(
-                                ["rostopic", "pub", "/cmd_vel", "geometry_msgs/Twist", 
-                                 "linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}"],
-                                "停止机器人运动", timeout=5
-                            ):
-                                success_count += 1
+                            subprocess.run(["rostopic", "pub", "/cmd_vel", "geometry_msgs/Twist", 
+                                           "linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}"], 
+                                         capture_output=True, text=True, check=False, timeout=2)
                             
                             # 发送停止舞蹈服务命令
-                            if self._safe_ros_command(
-                                ["rostopic", "pub", "/play_dance", "std_msgs/String", "data: 'stop'"],
-                                "停止舞蹈服务", timeout=5
-                            ):
-                                success_count += 1
+                            subprocess.run(["rostopic", "pub", "/play_dance", "std_msgs/String", "data: 'stop'"], 
+                                         capture_output=True, text=True, check=False, timeout=2)
                             
-                            print(f"✅ ROS 服务资源清理完成 ({success_count}/{total_commands} 个命令成功)")
+                            print("✅ ROS 服务资源已清理")
                         except Exception as cleanup_e:
                             print(f"⚠️ 清理 ROS 服务时出错: {cleanup_e}")
                     
@@ -3219,164 +3172,92 @@ def main(return_remote=False):
                 
                 # L1 + R2: 先执行L1+F1功能，再执行后台导航任务 (高优先级)
                 elif remote.get_combo_once('L1', 'R2'):
+                    print("🔍 检测到 L1 + R2 按键组合")
+                    player._play_tts_only("启动回到后台", 0)
+
                     if player.function_activated:  # 只有功能激活后才能使用
                         print("🚀 检测到 L1 + R2，先执行L1+F1功能，再执行后台导航任务")
                         try:
-                            # 在单独线程中执行，避免阻塞主循环
-                            import threading
+                            # 直接执行，不在独立线程中
+                            print("🔄 开始执行L1+R2功能...")
                             
-                            def execute_l1_f1_function():
-                                """执行L1+F1的功能：取消播放并回到初始姿态"""
-                                try:
-                                    # 检查当前状态并执行相应的L1+F1逻辑
-                                    if player.state in ["playing", "ramp_in"]:
-                                        print("⏹️ 执行L1+F1功能：取消播放并回到初始姿态")
-                                        # 播放取消提示音
-                                        try:
-                                            if not hasattr(player, '_last_cancel_tts_time'):
-                                                player._last_cancel_tts_time = 0
-                                            current_time = time.time()
-                                            if current_time - player._last_cancel_tts_time > 3.0:
-                                                player.audio_processor.audio_client.TtsMaker("取消动作", 0)
-                                                player._last_cancel_tts_time = current_time
-                                        except Exception as e:
-                                            print(f"❌ 播放提示音时出错: {e}")
-                                        
-                                        # 关闭所有 fuking2des 相关程序
-                                        print("🛑 正在关闭 fuking2des 相关程序...")
-                                        player._check_and_kill_fuking2des_processes()
-                                        
-                                        player.stop_play()
-                                        
-                                    elif player.state == "move_to_initial":
-                                        print("⏹️ 执行L1+F1功能：强制停止回到初始姿态过程")
-                                        # 播放取消提示音
-                                        try:
-                                            if not hasattr(player, '_last_cancel_tts_time'):
-                                                player._last_cancel_tts_time = 0
-                                            current_time = time.time()
-                                            if current_time - player._last_cancel_tts_time > 3.0:
-                                                player.audio_processor.audio_client.TtsMaker("收到强制停止指令", 0)
-                                                player._last_cancel_tts_time = current_time
-                                        except Exception as e:
-                                            print(f"❌ 播放提示音时出错: {e}")
-                                        
-                                        # 关闭所有 fuking2des 相关程序
-                                        print("🛑 正在关闭 fuking2des 相关程序...")
-                                        player._check_and_kill_fuking2des_processes()
-                                        
-                                        # 直接设置为停止状态并停止音频
-                                        player.state = "stopped"
-                                        player._stop_audio_playback()
-                                        
+                            # 第一步：执行L1+F1功能
+                            print("🔄 第一步：执行L1+F1功能...")
+                            player._play_tts_only("收到指令，正在回到后台", 0)
+                            
+                            # 检查当前状态并执行相应的L1+F1逻辑
+                            if player.state in ["playing", "ramp_in"]:
+                                print("⏹️ 执行L1+F1功能：取消播放并回到初始姿态")
+                                # 关闭所有 fuking2des 相关程序
+                                print("🛑 正在关闭 fuking2des 相关程序...")
+                                player._check_and_kill_fuking2des_processes()
+                                player.stop_play()
+                                
+                            elif player.state == "move_to_initial":
+                                print("⏹️ 执行L1+F1功能：强制停止回到初始姿态过程")
+                                # 关闭所有 fuking2des 相关程序
+                                print("🛑 正在关闭 fuking2des 相关程序...")
+                                player._check_and_kill_fuking2des_processes()
+                                # 直接设置为停止状态并停止音频
+                                player.state = "stopped"
+                                player._stop_audio_playback()
+                                
+                            else:
+                                print("ℹ️ 当前状态无需执行L1+F1功能")
+                            
+                            # 等待一段时间让L1+F1功能完成
+                            time.sleep(1)  # 等待1秒
+                            
+                            # 第二步：执行后台导航任务
+                            print("🔄 第二步：执行后台导航任务...")
+                            
+                            # 1. 先关闭fuking2des进程
+                            print("🛑 正在关闭fuking2des进程...")
+                            player._check_and_kill_fuking2des_processes()
+                            
+                            # 2. 检查导航系统状态
+                            print("🔍 检查导航系统状态...")
+                            navigation_running = False
+                            if hasattr(player, '_fastlio_proc') and player._fastlio_proc is not None:
+                                if player._fastlio_proc.poll() is None:  # 进程仍在运行
+                                    navigation_running = True
+                            
+                            if not navigation_running:
+                                print("❌ 导航系统未启动，无法执行后台导航")
+                                player._play_tts_only("导航系统未启动，请先按Start加L1启动导航", 0)
+                            else:
+                                print("ℹ️ 导航系统已启动，可以执行后台导航")
+                                
+                                # 3. 运行robust_navigation_to_backstage.py
+                                print("🚀 启动robust_navigation_to_backstage.py...")
+                                import subprocess
+                                import os
+                                
+                                # 构建脚本路径
+                                script_path = "/home/unitree/HongTu/PythonProject/point_nav/test/robust_navigation_to_backstage.py"
+                                
+                                if os.path.exists(script_path):
+                                    # 运行脚本
+                                    result = subprocess.run([
+                                        "python3", script_path
+                                    ], capture_output=True, text=True, timeout=300)  # 5分钟超时
+                                    
+                                    if result.returncode == 0:
+                                        print("✅ robust_navigation_to_backstage.py 执行成功")
                                     else:
-                                        print("ℹ️ 当前状态无需执行L1+F1功能")
-                                        
-                                except Exception as e:
-                                    print(f"❌ 执行L1+F1功能时出错: {e}")
-                            
-                            def execute_backstage_navigation():
-                                """执行后台导航任务"""
-                                try:
-                                   
-                                    # 1. 先关闭fuking2des进程
-                                    print("🛑 正在关闭fuking2des进程...")
-                                    player._check_and_kill_fuking2des_processes()
-                                    
-                                    # 2. 检查导航系统状态
-                                    print("🔍 检查导航系统状态...")
-                                    try:
-                                        # 检查导航系统是否已经启动（通过检查进程）
-                                        navigation_running = False
-                                        if hasattr(player, '_fastlio_proc') and player._fastlio_proc is not None:
-                                            if player._fastlio_proc.poll() is None:  # 进程仍在运行
-                                                navigation_running = True
-                                        
-                                        if not navigation_running:
-                                            print("❌ 导航系统未启动，无法执行后台导航")
-                                            # 语音播报提示
-                                            try:
-                                                player._play_tts_only("导航系统未启动，请先按Start加L1启动导航", 0)
-                                            except Exception as tts_e:
-                                                print(f"❌ 播放提示音时出错: {tts_e}")
-                                            return  # 直接返回，不执行后续操作
-                                        else:
-                                            print("ℹ️ 导航系统已启动，可以执行后台导航")
-                                    except Exception as nav_e:
-                                        print(f"⚠️ 检查导航系统时出错: {nav_e}")
-                                        # 检查失败时也语音提示
-                                        try:
-                                            player._play_tts_only("无法检查导航系统状态", 0)
-                                        except Exception as tts_e:
-                                            print(f"❌ 播放提示音时出错: {tts_e}")
-                                        return  # 直接返回，不执行后续操作
-                                    
-                                    # 3. 运行robust_navigation_to_backstage.py
-                                    print("🚀 启动robust_navigation_to_backstage.py...")
-                                    import subprocess
-                                    import os
-                                    
-                                    # 构建脚本路径
-                                    script_path = "/home/unitree/HongTu/PythonProject/point_nav/test/robust_navigation_to_backstage.py"
-                                    
-                                    if os.path.exists(script_path):
-                                        # 运行脚本
-                                        result = subprocess.run([
-                                            "python3", script_path
-                                        ], capture_output=True, text=True, timeout=300)  # 5分钟超时
-                                        
-                                        if result.returncode == 0:
-                                            print("✅ robust_navigation_to_backstage.py 执行成功")
-                                        else:
-                                            print(f"⚠️ robust_navigation_to_backstage.py 执行异常: {result.stderr}")
-                                    else:
-                                        print(f"❌ 脚本文件不存在: {script_path}")
-                                        
-                                except subprocess.TimeoutExpired:
-                                    print("⏰ robust_navigation_to_backstage.py 执行超时，强制终止")
-                                except Exception as e:
-                                    print(f"❌ 执行后台导航任务时出错: {e}")
-                                    # 意外发生时回到后台
-                                    try:
-                                        print("🔄 意外发生，尝试回到后台...")
-                                        # 播放语音播报"回到后台"
-                                        player._play_tts_only("回到后台", 0)
-                                        # 这里可以添加回到后台的逻辑
-                                        # 例如：播放回到后台的动作或发送特定指令
-                                        player.play_action('Backstage', speed=1.0)  # 假设有Backstage动作
-                                    except Exception as fallback_e:
-                                        print(f"❌ 回到后台时出错: {fallback_e}")
-                            
-                            def execute_l1_r2_sequence():
-                                """按顺序执行L1+R2的完整流程"""
-                                try:
-                                    # 第一步：执行L1+F1功能
-                                    player._play_tts_only("收到指令，正在回到后台", 0)
-                                    
-                                    print("🔄 第一步：执行L1+F1功能...")
-                                    execute_l1_f1_function()
-                                    
-                                    # 等待一段时间让L1+F1功能完成
-                                    import time
-                                    time.sleep(1)  # 等待1秒
-                                    
-                                    # 第二步：执行后台导航任务
-                                    print("🔄 第二步：执行后台导航任务...")
-                                    player._play_tts_only("收到指令，正在回到后台", 0)
-                                    execute_backstage_navigation()
-                                    
-                                except Exception as e:
-                                    print(f"❌ 执行L1+R2序列时出错: {e}")
-                            
-                            # 启动执行序列
-                            nav_thread = threading.Thread(target=execute_l1_r2_sequence)
-                            nav_thread.daemon = True
-                            nav_thread.start()
+                                        print(f"⚠️ robust_navigation_to_backstage.py 执行异常: {result.stderr}")
+                                else:
+                                    print(f"❌ 脚本文件不存在: {script_path}")
+                                    player._play_tts_only("脚本文件不存在", 0)
                             
                         except Exception as e:
                             print(f"❌ 启动后台导航任务时出错: {e}")
                     else:
                         print("🔒 功能未激活，请先按 F1 + Start 激活功能")
+                        try:
+                            player._play_tts_only("功能未激活，请先按F1加Start激活功能", 0)
+                        except Exception as e:
+                            print(f"❌ 播放提示音时出错: {e}")
                 
                 # Start + L1: 启动 fastlio 导航
                 elif remote.get_combo_once('Start', 'L1'):
