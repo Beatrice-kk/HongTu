@@ -107,7 +107,7 @@ namespace fastlio
         // Apply blind spot filter to remove points from vehicle body
         // This prevents the vehicle's own body points (in the blind spot) from being added to the map
         // during both INITIALIZE and MAPPING states
-        double blind_sq_dist = 1.0 * 1.0; // 1 meter radius squared
+        double blind_sq_dist = params_.blind_spot_radius * params_.blind_spot_radius;
         PointCloudXYZI::Ptr cloud_filtered(new PointCloudXYZI);
         cloud_filtered->reserve(cloud_undistorted_lidar_->size());
         
@@ -123,8 +123,8 @@ namespace fastlio
         cloud_filtered->height = 1;
         cloud_filtered->is_dense = true;
         
-        // Replace the original cloud with the filtered one
-        *cloud_undistorted_lidar_ = *cloud_filtered;
+        // Replace the original cloud with the filtered one (efficient pointer assignment)
+        cloud_undistorted_lidar_ = cloud_filtered;
         
         // If all points were filtered out, return early to avoid processing empty cloud
         if (cloud_undistorted_lidar_->empty())

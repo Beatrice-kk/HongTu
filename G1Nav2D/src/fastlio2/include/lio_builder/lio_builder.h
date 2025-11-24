@@ -40,6 +40,7 @@ namespace fastlio
         double cube_len = 1000.0;
         double det_range = 100.0;
         double move_thresh = 1.5;
+        double blind_spot_radius = 1.0;  // Radius to filter out vehicle body points (meters)
 
         bool extrinsic_est_en = false;
         bool align_gravity = false;
