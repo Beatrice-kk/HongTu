@@ -104,6 +104,32 @@ namespace fastlio
         if (!imu_processor_->operator()(meas, cloud_undistorted_lidar_))
             return;
 
+        // Apply blind spot filter to remove points from vehicle body
+        // This prevents the vehicle's own body points (in the blind spot) from being added to the map
+        // during both INITIALIZE and MAPPING states
+        double blind_sq_dist = params_.blind_spot_radius * params_.blind_spot_radius;
+        PointCloudXYZI::Ptr cloud_filtered(new PointCloudXYZI);
+        cloud_filtered->reserve(cloud_undistorted_lidar_->size());
+        
+        for (const auto &point : cloud_undistorted_lidar_->points)
+        {
+            double sq_dist = point.x * point.x + point.y * point.y + point.z * point.z;
+            if (sq_dist > blind_sq_dist)
+            {
+                cloud_filtered->points.push_back(point);
+            }
+        }
+        cloud_filtered->width = cloud_filtered->points.size();
+        cloud_filtered->height = 1;
+        cloud_filtered->is_dense = true;
+        
+        // Replace the original cloud with the filtered one (efficient pointer assignment)
+        cloud_undistorted_lidar_ = cloud_filtered;
+        
+        // If all points were filtered out, return early to avoid processing empty cloud
+        if (cloud_undistorted_lidar_->empty())
+            return;
+
         down_size_filter_.setInputCloud(cloud_undistorted_lidar_);
         down_size_filter_.filter(*cloud_down_lidar_);
 
